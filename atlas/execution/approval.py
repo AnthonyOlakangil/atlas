@@ -54,6 +54,7 @@ def approve_ticket(ticket_id: int, session: Session | None = None) -> None:
     if ticket.status is not TicketStatus.PENDING_APPROVAL:
         raise ApprovalError(f"ticket #{ticket_id} is {ticket.status.value}, not PENDING_APPROVAL")
     ticket.status = TicketStatus.APPROVED
+    session.flush()
     log.info(f"ticket #{ticket_id} approved by operator")
 
 
@@ -70,6 +71,7 @@ def reject_ticket(ticket_id: int, session: Session | None = None) -> None:
     if ticket.status not in (TicketStatus.PENDING_APPROVAL, TicketStatus.APPROVED):
         raise ApprovalError(f"ticket #{ticket_id} is {ticket.status.value}")
     ticket.status = TicketStatus.REJECTED
+    session.flush()
     log.info(f"ticket #{ticket_id} rejected by operator")
 
 

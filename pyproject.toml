@@ -60,6 +60,9 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+"atlas/api/**" = ["B008"]  # FastAPI's Depends-in-default is the framework idiom
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
