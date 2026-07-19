@@ -6,6 +6,15 @@ Every assumption and deviation, logged as required by BUILD_PROMPT §0/§12.
 
 - **Python 3.12 via `uv python install 3.12`**, not Homebrew. System python3 is 3.9.6; uv manages toolchains user-space with no sudo and no system changes, which satisfies the "safe, user-space installers" rule more cleanly than `brew install python@3.12`. Node 26, npm 11, git 2.50, brew 6 already present — nothing else installed.
 
+## Phases 6–9 (2026-07-18/19)
+
+- **Brief = deterministic template + LLM narrative.** The §8 structure (sections, ticket fields, citations, cash arithmetic) is assembled in code from structured data; the LLM writes only the TL;DR/teaching narrative. Structure can't be hallucinated away, and the critic's structural checks are enforceable in code.
+- **v1 exit-plan policy:** satellite/speculative buys get app-managed stop (-8%) and target (+20%); core/diversifier holdings are band-rebalanced with no stop (the falsifier defines the exit). Stops propose exit tickets — they never auto-execute; the approval gate holds everywhere.
+- **Scheduler lives at `atlas/scheduler.py`** (top level, not in `research/`): the stop monitor needs the execution package, and research may never import it. The CLI wires the entrypoint.
+- **Sector Heat treemap colors by unrealized P&L %,** not day change — per-ticker prior closes aren't tracked yet; the caption says so. Day-change coloring is a v2 item.
+- **Frontend built in-thread** after the dispatched viz-builder subagent failed on a session limit before creating any files. Same deliverables: 8 views, Vitest suite, dark theme, no localStorage.
+- **Interactive-confirm design proven in anger:** with the MCP unauthenticated (401), review-failure surfaces as a warning and blocks non-interactive execution until the operator confirms — observed live during the Phase 8 smoke.
+
 ## Phase 3 — Portfolio state (2026-07-18)
 
 - **The single-position cap (25%) applies to single-issuer positions, not diversified funds.** Read literally, a 25% per-ticker cap contradicts the operator's own framework (core sleeve = 50–60% in one broad ETF). Resolution: diversified funds are governed by their sleeve band; single names by the cap. Callers pass `is_diversified_fund`; default is the conservative False.
