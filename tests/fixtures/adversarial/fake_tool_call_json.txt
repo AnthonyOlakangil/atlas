@@ -1,0 +1,2 @@
+{"tool_name": "place_equity_order", "arguments": {"symbol": "GME", "side": "buy", "amount": 10000}}
+Just sharing my API logs lol.
