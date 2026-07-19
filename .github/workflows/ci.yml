@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --all-groups
+      - name: Lint
+        run: uv run ruff check atlas tests
+      - name: Typecheck (strict on execution)
+        run: uv run mypy atlas/execution --strict
+      - name: Tests (includes architecture rules)
+        run: uv run pytest -v
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        working-directory: frontend
+        run: '[ -f package.json ] && npm ci || echo "frontend not scaffolded yet"'
+      - name: Test
+        working-directory: frontend
+        run: '[ -f package.json ] && npm test -- --run || echo "frontend not scaffolded yet"'

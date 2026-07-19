@@ -1,0 +1,38 @@
+# Secrets — never committed
+.env
+*.pem
+*.key
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Runtime artifacts (generated, not tracked)
+*.db
+*.sqlite3
+runs/
+logs/
+.cache/

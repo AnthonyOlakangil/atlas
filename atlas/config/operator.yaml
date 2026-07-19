@@ -1,0 +1,57 @@
+# The operator profile — Atlas's objective function. See BUILD_PROMPT §2.
+operator:
+  experience: "early-stage retail investor, technically literate (CS undergrad), learning by doing"
+  broker: "Robinhood"
+  account_type: "cash"            # T+1 settlement
+  fractional_shares: true
+  starting_capital_usd: 250       # configurable; keep math budget-independent
+  contribution_cadence: "irregular"
+
+objective:
+  primary: "beat broad-index total return over a 2-5 year horizon"
+  benchmark: "SPY"
+  secondary: "operator learns markets through the process — every brief teaches"
+
+risk:
+  tolerance: "moderate"
+  drawdown_ceiling_comfort: 0.30   # will hold through ~30%, not more
+  max_single_position_pct: 0.25
+  max_sector_concentration_pct: 0.45
+  horizon: "swing and position trades held weeks to months; core held years"
+
+allocation_framework:
+  # IMPORTANT — the `seed_examples` in each sleeve are STARTING POINTS, not a
+  # whitelist, not a closed universe, and not the portfolio Atlas must hold.
+  # Atlas researches and optimizes the best instruments per sleeve — including
+  # tickers that appear nowhere in this file — subject only to the sleeve
+  # percentage bands, the risk caps, and the sleeve thesis. The tickers are
+  # illustrative and fully substitutable.
+  universe: "open — any US-listed, fractionally-tradable, long-only equity or ETF is a candidate; Atlas discovers and proposes the best fit per sleeve"
+
+  core:
+    target_pct: [0.50, 0.60]
+    thesis: "broad-market ballast and the benchmark being beaten; low-cost, diversified"
+    seed_examples: ["VOO", "VTI", "SPY"]
+    note: "the benchmark and the ballast"
+  satellite_ai_semis:
+    target_pct: [0.20, 0.25]
+    thesis: "concentrated exposure to the AI/semiconductor buildout; the operator's higher-conviction growth tilt"
+    seed_examples: ["SMH", "SOXX", "SOXQ", "NVDA", "TSM", "AVGO", "AMD", "MU", "INTC", "DELL"]
+    note: "optimize within the theme — rotation, valuation, and catalysts decide the actual holdings"
+  diversifier:
+    target_pct: [0.10, 0.15]
+    thesis: "offset tech concentration; defensive and/or non-correlated ballast"
+    seed_examples: ["GLDM", "IAU", "GLD", "XLV", "XLF"]
+    note: "operator chose XLF over covered-call income funds — growth alignment over yield"
+  speculative:
+    target_pct: [0.0, 0.05]
+    thesis: "small, high-variance, can-fully-lose sleeve for asymmetric bets"
+    seed_examples: ["IBIT"]
+    note: "sized as money that can be fully lost"
+
+preferences:
+  - "plain-language mechanical explanations with concrete examples"
+  - "direct and concise; no filler, no hedging theater"
+  - "structured markdown, bullets over prose walls"
+  - "explain terminology inline the first time it appears in any brief"
+  - "wants to understand the WHY, not just the WHAT"

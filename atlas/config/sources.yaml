@@ -1,0 +1,218 @@
+# Data source registry. Illustrative starting set — Atlas discovers and adds
+# reputable sources over time (BUILD_PROMPT §7.0). New social/video sources
+# default to trust_tier: untrusted (sentiment-only, never factual basis).
+#
+# trust_tier semantics:
+#   primary    — facts; the basis for inferences and trades; cite freely
+#   secondary  — reporting; cite with attribution
+#   untrusted  — sentiment/crowd-positioning signal ONLY; never a factual basis
+#
+# rate_limit is requests/minute; cache_ttl in seconds.
+
+sources:
+  # --- primary: facts ---
+  robinhood_mcp:
+    trust_tier: primary
+    kind: mcp
+    rate_limit: 30
+    cache_ttl: 300          # 5m quotes
+    parser: json
+    enabled: true
+  yfinance:
+    trust_tier: primary
+    kind: api
+    rate_limit: 30
+    cache_ttl: 300
+    parser: json
+    enabled: true
+  fred:
+    trust_tier: primary
+    kind: api
+    url: "https://api.stlouisfed.org/fred"
+    rate_limit: 10
+    cache_ttl: 3600
+    parser: json
+    enabled: true
+  sec_edgar:
+    trust_tier: primary
+    kind: api
+    url: "https://efts.sec.gov/LATEST/search-index"
+    rate_limit: 5           # SEC fair-access guidance
+    cache_ttl: 86400
+    parser: json
+    enabled: true
+  treasury_gov:
+    trust_tier: primary
+    kind: api
+    url: "https://home.treasury.gov/resource-center/data-chart-center/interest-rates"
+    rate_limit: 5
+    cache_ttl: 3600
+    parser: xml
+    enabled: true
+  federal_reserve:
+    trust_tier: primary
+    kind: rss
+    url: "https://www.federalreserve.gov/feeds/press_all.xml"
+    rate_limit: 5
+    cache_ttl: 3600
+    parser: rss
+    enabled: true
+  yahoo_finance_news:
+    trust_tier: primary
+    kind: rss
+    url: "https://finance.yahoo.com/news/rssindex"
+    rate_limit: 10
+    cache_ttl: 86400
+    parser: rss
+    enabled: true
+
+  # --- secondary: reporting, cite with attribution ---
+  reuters:
+    trust_tier: secondary
+    kind: rss
+    url: "https://www.reutersagency.com/feed/?best-topics=business-finance"
+    rate_limit: 10
+    cache_ttl: 86400
+    parser: rss
+    enabled: true
+  ap_news:
+    trust_tier: secondary
+    kind: rss
+    url: "https://apnews.com/hub/financial-markets"
+    rate_limit: 10
+    cache_ttl: 86400
+    parser: html
+    enabled: true
+  cnbc:
+    trust_tier: secondary
+    kind: rss
+    url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664"
+    rate_limit: 10
+    cache_ttl: 86400
+    parser: rss
+    enabled: true
+  marketwatch:
+    trust_tier: secondary
+    kind: rss
+    url: "https://feeds.content.dowjones.io/public/rss/mw_topstories"
+    rate_limit: 10
+    cache_ttl: 86400
+    parser: rss
+    enabled: true
+  # Political/policy coverage — subject to the two-lean rule (§7.2)
+  nyt_politics:
+    trust_tier: secondary
+    kind: rss
+    url: "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml"
+    editorial_lean: left
+    policy_only: true
+    rate_limit: 10
+    cache_ttl: 86400
+    parser: rss
+    enabled: true
+  cnn_politics:
+    trust_tier: secondary
+    kind: rss
+    url: "http://rss.cnn.com/rss/cnn_allpolitics.rss"
+    editorial_lean: left
+    policy_only: true
+    rate_limit: 10
+    cache_ttl: 86400
+    parser: rss
+    enabled: true
+  fox_politics:
+    trust_tier: secondary
+    kind: rss
+    url: "https://moxie.foxnews.com/google-publisher/politics.xml"
+    editorial_lean: right
+    policy_only: true
+    rate_limit: 10
+    cache_ttl: 86400
+    parser: rss
+    enabled: true
+  wsj_markets:
+    trust_tier: secondary
+    kind: rss
+    url: "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain"
+    editorial_lean: right
+    rate_limit: 10
+    cache_ttl: 86400
+    parser: rss
+    enabled: true
+
+  # --- untrusted: sentiment/crowd signal ONLY ---
+  reddit_investing:
+    trust_tier: untrusted
+    kind: praw
+    subreddit: investing
+    rate_limit: 10
+    cache_ttl: 3600
+    parser: praw
+    enabled: true
+  reddit_stocks:
+    trust_tier: untrusted
+    kind: praw
+    subreddit: stocks
+    rate_limit: 10
+    cache_ttl: 3600
+    parser: praw
+    enabled: true
+  reddit_security_analysis:
+    trust_tier: untrusted
+    kind: praw
+    subreddit: SecurityAnalysis
+    rate_limit: 10
+    cache_ttl: 3600
+    parser: praw
+    enabled: true
+  reddit_etfs:
+    trust_tier: untrusted
+    kind: praw
+    subreddit: ETFs
+    rate_limit: 10
+    cache_ttl: 3600
+    parser: praw
+    enabled: true
+  reddit_wallstreetbets:
+    trust_tier: untrusted
+    kind: praw
+    subreddit: wallstreetbets
+    noise: true            # tiered as noise — heavily discounted even within sentiment
+    rate_limit: 10
+    cache_ttl: 3600
+    parser: praw
+    enabled: true
+  stocktwits_trending:
+    trust_tier: untrusted
+    kind: api
+    url: "https://api.stocktwits.com/api/2/trending/symbols.json"
+    rate_limit: 10
+    cache_ttl: 3600
+    parser: json
+    enabled: true
+  youtube_finance:
+    trust_tier: untrusted
+    kind: youtube
+    channels: []            # operator whitelists channels here
+    rate_limit: 5
+    cache_ttl: 86400
+    parser: transcript
+    enabled: false          # off until the operator whitelists channels
+
+  # --- reference corpus (glossary/teaching layer; refresh monthly) ---
+  investopedia:
+    trust_tier: primary
+    kind: reference
+    url: "https://www.investopedia.com"
+    rate_limit: 5
+    cache_ttl: 604800       # 7d
+    parser: html
+    enabled: true
+  robinhood_learn:
+    trust_tier: primary
+    kind: reference
+    url: "https://learn.robinhood.com"
+    rate_limit: 5
+    cache_ttl: 604800
+    parser: html
+    enabled: true
