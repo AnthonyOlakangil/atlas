@@ -172,8 +172,3 @@ def run_daily_cycle(kind: str = "preopen") -> None:
         )
 
 
-def run_scheduler() -> None:
-    """APScheduler loop — wired in Phase 9."""
-    from atlas.research.scheduler import start_scheduler
-
-    start_scheduler()

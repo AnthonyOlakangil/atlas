@@ -82,9 +82,9 @@ def serve(port: int = typer.Option(8000, help="Port on 127.0.0.1")) -> None:
 @app.command()
 def schedule() -> None:
     """Start the APScheduler loop (06:30 PT cycle, 13:15 PT update, stop monitor)."""
-    from atlas.research.orchestrator import run_scheduler
+    from atlas.scheduler import start_scheduler
 
-    run_scheduler()
+    start_scheduler()
 
 
 if __name__ == "__main__":

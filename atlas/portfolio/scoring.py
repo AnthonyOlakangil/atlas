@@ -55,7 +55,7 @@ def score_due_tickets(session: Session, today: date, lookup: PriceLookup) -> int
                 t_ret = -t_ret  # a good sell is one the price fell after
             session.add(
                 Score(
-                    ticket_id=ticket.id,
+                    ticket=ticket,  # via relationship so ticket.scores stays coherent
                     window=window,
                     ticket_return_pct=t_ret.quantize(Decimal("0.0001")),
                     spy_return_pct=s_ret.quantize(Decimal("0.0001")),
