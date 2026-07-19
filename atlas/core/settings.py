@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     reddit_user_agent: str = "atlas-research/0.1 (personal research agent)"
     youtube_api_key: str = ""
     rh_mcp_url: str = "https://agent.robinhood.com/mcp/trading"
+    rh_mcp_access_token: str = ""
 
     timezone: str = "America/Los_Angeles"
 

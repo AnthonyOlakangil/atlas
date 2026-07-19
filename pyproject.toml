@@ -47,7 +47,10 @@ atlas = "atlas.cli:app"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not live'"
+markers = [
+    "live: requires real network credentials (Robinhood MCP OAuth / Gemini key); run with -m live",
+]
 
 [tool.ruff]
 line-length = 100

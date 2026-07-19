@@ -165,6 +165,29 @@ class Snapshot(Base):
     positions: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
+class PaperOrder(Base):
+    """Paper-book order history — the paper analogue of `get_equity_orders`.
+
+    Settled/unsettled cash (§2.1) is derived from this history, mirroring how
+    live mode derives it from the MCP order history (§5 gap 5).
+    """
+
+    __tablename__ = "paper_orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    placed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    ticker: Mapped[str] = mapped_column(String(12), index=True)
+    side: Mapped[TradeAction]
+    order_type: Mapped[OrderType]
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    notional: Mapped[Decimal] = mapped_column(Numeric(18, 2))  # dollars in/out at fill
+    limit_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), default=None)
+    fill_price: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    status: Mapped[str] = mapped_column(String(16), default="filled")  # filled | cancelled
+    settles_on: Mapped[date] = mapped_column(Date)  # T+1: proceeds usable from this date
+    ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), default=None)
+
+
 class GlossaryTerm(Base):
     """Terms already shown to the operator — powers first-use inline definitions (§7 reference corpus)."""
 
