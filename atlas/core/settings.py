@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -45,6 +46,10 @@ class OperatorConfig(BaseModel):
     sleeves: dict[str, SleeveConfig]
     universe: str
     preferences: list[str]
+
+    def risk_decimal(self, name: str) -> Decimal:
+        """Risk cap as a Decimal (yaml floats never touch money math directly)."""
+        return Decimal(str(getattr(self.risk, name)))
 
     @classmethod
     def load(cls, path: Path | None = None) -> OperatorConfig:

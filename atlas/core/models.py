@@ -188,6 +188,18 @@ class PaperOrder(Base):
     ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), default=None)
 
 
+class CashEvent(Base):
+    """Deposits/withdrawals into the paper (or agentic) account — the ledger's cash inflows."""
+
+    __tablename__ = "cash_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    on: Mapped[date] = mapped_column(Date, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))  # negative = withdrawal
+    note: Mapped[str] = mapped_column(String(200), default="")
+    account: Mapped[str] = mapped_column(String(20), default="paper")
+
+
 class GlossaryTerm(Base):
     """Terms already shown to the operator — powers first-use inline definitions (§7 reference corpus)."""
 
