@@ -23,8 +23,10 @@ cp .env.example .env         # then edit .env:
 # 3. Database
 uv run alembic upgrade head
 
-# 4. Robinhood MCP auth (optional until you want live data)
-#    See RUNBOOK.md — OAuth handshake completed in your browser; Atlas never sees your password.
+# 4. Broker link (optional!) — BROKER_MODE=manual is the default: no Robinhood
+#    connection; copy atlas/config/portfolio.example.yaml → portfolio.yaml and
+#    maintain your holdings by hand. Set BROKER_MODE=connected + MCP OAuth
+#    (RUNBOOK.md) only if you want live account reads and gated execution.
 
 # 5. Frontend
 cd frontend && npm install

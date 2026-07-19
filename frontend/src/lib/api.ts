@@ -56,6 +56,12 @@ export interface Ticket {
   learning_note: string;
   exit_stop: number | null;
   exit_target: number | null;
+  robinhood_howto: string;
+}
+
+export interface Meta {
+  broker_mode: "manual" | "connected";
+  atlas_mode: string;
 }
 
 export interface BriefData {
@@ -119,6 +125,7 @@ export class ApiError extends Error {
   }
 }
 
+export const fetchMeta = () => get<Meta>("/api/meta");
 export const fetchPortfolio = () => get<Portfolio>("/api/portfolio");
 export const fetchTickets = () => get<Ticket[]>("/api/tickets");
 export const fetchBrief = () => get<BriefData>("/api/brief/latest");

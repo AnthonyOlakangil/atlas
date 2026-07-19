@@ -11,11 +11,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 
+import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from atlas.core.models import CashEvent, PaperOrder, Position, TradeAction
+from atlas.core.settings import CONFIG_DIR, get_operator_config, get_settings
 
 GFV_RESTRICTION_THRESHOLD = 3  # three GFVs in 12 months → 90-day restriction
 
@@ -206,6 +209,95 @@ class PortfolioState:
             return Decimal(0)
         held = sum((p.value for p in self.positions if p.ticker == ticker), Decimal(0))
         return held / total
+
+
+# --- manual broker mode: the book lives in portfolio.yaml --------------------
+
+
+class PortfolioConfigError(RuntimeError):
+    """portfolio.yaml missing or malformed — the error says exactly what to fix."""
+
+
+def load_manual_state(
+    prices: dict[str, Decimal], as_of: date, path: Path | None = None
+) -> PortfolioState:
+    """BROKER_MODE=manual: holdings and cash come from a hand-maintained yaml.
+
+    Same PortfolioState type as every other source — sizing, drift, and the
+    settled/unsettled-cash rules operate on these numbers unchanged. There is
+    no order history, so the GFV ledger is empty (the broker tracks GFVs for
+    trades the operator places by hand).
+    """
+    path = path or (CONFIG_DIR / "portfolio.yaml")
+    if not path.exists():
+        raise PortfolioConfigError(
+            f"{path} not found — copy {path.parent / 'portfolio.example.yaml'} to "
+            "portfolio.yaml and fill in your holdings (BROKER_MODE=manual reads it)"
+        )
+    try:
+        raw = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        raise PortfolioConfigError(f"{path} is not valid YAML: {exc}") from exc
+
+    cfg = get_operator_config()
+
+    def infer_sleeve(ticker: str) -> str:
+        for name, sleeve in cfg.sleeves.items():
+            if ticker in sleeve.seed_examples:
+                return name
+        return "unassigned"
+
+    positions: list[PositionView] = []
+    for i, h in enumerate(raw.get("holdings") or []):
+        try:
+            ticker = str(h["ticker"]).upper()
+            shares = Decimal(str(h["shares"]))
+            cost_basis = Decimal(str(h["cost_basis"]))  # TOTAL dollars paid for the lot
+        except (KeyError, TypeError, ArithmeticError) as exc:
+            raise PortfolioConfigError(
+                f"{path} holdings[{i}] needs ticker/shares/cost_basis: {h!r}"
+            ) from exc
+        if shares < 0 or cost_basis < 0:
+            raise PortfolioConfigError(f"{path} holdings[{i}]: negative shares/cost_basis")
+        price = prices.get(ticker, Decimal(0))
+        positions.append(
+            PositionView(
+                ticker=ticker,
+                sleeve=str(h.get("sleeve") or infer_sleeve(ticker)),
+                shares=shares,
+                cost_basis=cost_basis,
+                price=price,
+                value=(shares * price).quantize(Decimal("0.01")),
+            )
+        )
+
+    try:
+        cash = CashState(
+            settled=Decimal(str(raw.get("settled_cash", 0))),
+            unsettled=Decimal(str(raw.get("unsettled_cash", 0))),
+        )
+    except ArithmeticError as exc:
+        raise PortfolioConfigError(f"{path}: settled_cash/unsettled_cash must be numbers") from exc
+    if cash.settled < 0 or cash.unsettled < 0:
+        raise PortfolioConfigError(f"{path}: cash amounts cannot be negative")
+
+    ledger = Ledger(cash=cash, gfv_events=[], open_lots=[])
+    return PortfolioState(as_of=as_of, positions=positions, cash=cash, ledger=ledger)
+
+
+def load_portfolio_state(
+    session: Session,
+    prices: dict[str, Decimal],
+    as_of: date,
+    *,
+    broker_mode: str | None = None,
+    portfolio_path: Path | None = None,
+) -> PortfolioState:
+    """The one interface every consumer uses; BROKER_MODE picks the source."""
+    mode = broker_mode or get_settings().broker_mode
+    if mode == "manual":
+        return load_manual_state(prices, as_of, portfolio_path)
+    return load_paper_state(session, prices, as_of)
 
 
 def load_paper_state(

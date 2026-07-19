@@ -6,6 +6,15 @@ Every assumption and deviation, logged as required by BUILD_PROMPT §0/§12.
 
 - **Python 3.12 via `uv python install 3.12`**, not Homebrew. System python3 is 3.9.6; uv manages toolchains user-space with no sudo and no system changes, which satisfies the "safe, user-space installers" rule more cleanly than `brew install python@3.12`. Node 26, npm 11, git 2.50, brew 6 already present — nothing else installed.
 
+## Change request: BROKER_MODE (2026-07-20)
+
+- **`BROKER_MODE=manual` is the new default; `connected` preserves the full MCP path unchanged** (the pre-flag test suite is pinned to connected in conftest as the proof it stays intact).
+- **portfolio.yaml lives at `atlas/config/portfolio.yaml`** — the operator's request said `config/`, and this repo's config dir is `atlas/config/` (operator.yaml, sources.yaml). Gitignored; `portfolio.example.yaml` ships. `cost_basis` is defined as TOTAL dollars paid per lot, matching the internal Position/PositionView semantics.
+- **One state interface:** `load_portfolio_state()` dispatches manual (yaml) vs connected (ledger). Sizing/drift/settled-cash logic operate on either unchanged. Manual mode has no order history, so its GFV ledger is empty — the broker enforces GFVs for hand-placed trades; documented in RUNBOOK.
+- **Manual holdings get sleeves by explicit `sleeve:` key, else seed-example inference, else `unassigned`** — inference is a labeling default only, never a gate (§2.0 intact).
+- **`atlas filled --ticket-id --price` added:** manual mode's bookkeeping counterpart to execution — stamps an APPROVED ticket EXECUTED with the operator's real fill so +1/+5/+20d scoring and the track record still function without a broker link. It respects the approval gate and cannot double-record.
+- **Robinhood how-to extracted to `core/howto.py`** and served on each ticket via the API, so the dashboard's manual-mode "place this yourself" panel and the brief can never drift apart.
+
 ## Phases 6–9 (2026-07-18/19)
 
 - **Brief = deterministic template + LLM narrative.** The §8 structure (sections, ticket fields, citations, cash arithmetic) is assembled in code from structured data; the LLM writes only the TL;DR/teaching narrative. Structure can't be hallucinated away, and the critic's structural checks are enforceable in code.

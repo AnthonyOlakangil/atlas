@@ -41,6 +41,10 @@ class LiveModeLocked(ApprovalError):
     pass
 
 
+class BrokerNotConnected(ApprovalError):
+    """BROKER_MODE=manual: there is no broker link, so execution is inert."""
+
+
 def approve_ticket(ticket_id: int, session: Session | None = None) -> None:
     if session is None:
         from atlas.core.db import session_scope
@@ -73,6 +77,45 @@ def reject_ticket(ticket_id: int, session: Session | None = None) -> None:
     ticket.status = TicketStatus.REJECTED
     session.flush()
     log.info(f"ticket #{ticket_id} rejected by operator")
+
+
+def record_manual_fill(
+    ticket_id: int, fill_price: Decimal, session: Session | None = None
+) -> None:
+    """Manual mode: record a fill the OPERATOR placed in the app themselves.
+
+    This is bookkeeping, not execution — it only stamps an APPROVED ticket as
+    EXECUTED with the operator-reported price so outcome scoring (+1/+5/+20d)
+    still works. The operator must also update portfolio.yaml by hand.
+    """
+    if session is None:
+        from atlas.core.db import session_scope
+
+        with session_scope() as s:
+            record_manual_fill(ticket_id, fill_price, s)
+            return
+    ticket = session.get(Ticket, ticket_id)
+    if ticket is None:
+        raise ApprovalError(f"no ticket #{ticket_id}")
+    if ticket.status is not TicketStatus.APPROVED:
+        raise ApprovalError(
+            f"ticket #{ticket_id} is {ticket.status.value} — only an APPROVED ticket can be "
+            "recorded as filled (approve first; the gate applies to manual fills too)"
+        )
+    if fill_price <= 0:
+        raise ApprovalError("fill price must be positive")
+    ticket.status = TicketStatus.EXECUTED
+    ticket.executed_at = datetime.now(UTC)
+    ticket.fill_price = fill_price
+    session.flush()
+    log.info(
+        "manual fill recorded",
+        extra={"data": {"ticket": ticket_id, "fill_price": str(fill_price)}},
+    )
+    print(
+        f"Recorded: ticket #{ticket_id} filled at ${fill_price}. Now update "
+        "atlas/config/portfolio.yaml to match your real holdings and cash."
+    )
 
 
 def _default_confirm(prompt: str) -> bool:
@@ -129,9 +172,9 @@ def _revalidate(ticket: Ticket, session: Session) -> None:
     if ticket.is_fractional and ticket.limit_price is not None:
         raise ApprovalError(f"ticket #{ticket.id}: fractional ticket carries a limit price")
 
-    from atlas.portfolio.state import load_paper_state
+    from atlas.portfolio.state import load_portfolio_state
 
-    state = load_paper_state(session, {}, datetime.now(UTC).date())
+    state = load_portfolio_state(session, {}, datetime.now(UTC).date())
     if ticket.action is TradeAction.BUY and ticket.dollar_amount > state.cash.settled:
         raise ApprovalError(
             f"ticket #{ticket.id}: spend ${ticket.dollar_amount} exceeds settled cash "
@@ -173,6 +216,16 @@ def execute_ticket(
             f"ticket #{ticket_id} is {ticket.status.value} — only an APPROVED ticket can "
             "execute. Approve explicitly first: atlas approve --ticket-id "
             f"{ticket_id}"
+        )
+
+    # BROKER_MODE=manual: execution is inert — the operator places the trade
+    # themselves in the Robinhood app, following the ticket's how-to.
+    if client is None and get_settings().broker_mode == "manual":
+        raise BrokerNotConnected(
+            "broker not connected (BROKER_MODE=manual). Place this order yourself in "
+            f"Robinhood following ticket #{ticket_id}'s 'Robinhood how-to' (in the brief "
+            "and the dashboard's Ticket Review), then record the fill so it can be "
+            f"scored:  atlas filled --ticket-id {ticket_id} --price <your fill price>"
         )
 
     client = client or build_execution_client(session)

@@ -4,7 +4,7 @@ import BriefReader, { annotate } from "../views/BriefReader";
 import MarketPulse from "../views/MarketPulse";
 import Positions from "../views/Positions";
 import TicketReview from "../views/TicketReview";
-import { TICKET, mockFetch, renderWithQuery } from "./helpers";
+import { META_CONNECTED, META_MANUAL, TICKET, mockFetch, renderWithQuery } from "./helpers";
 
 const EMPTY_PORTFOLIO = {
   as_of: "2026-07-18T13:30:00+00:00",
@@ -18,7 +18,10 @@ const EMPTY_PORTFOLIO = {
 
 describe("TicketReview", () => {
   it("renders every required ticket field including bear case and portfolio impact", async () => {
-    mockFetch([{ match: /\/api\/tickets$/, body: [TICKET] }]);
+    mockFetch([
+      { match: /\/api\/meta/, body: META_CONNECTED },
+      { match: /\/api\/tickets$/, body: [TICKET] },
+    ]);
     renderWithQuery(<TicketReview />);
     await screen.findByText(/#7 BUY QQQM/);
     expect(screen.getByText(/Bear case/)).toBeInTheDocument();
@@ -30,14 +33,15 @@ describe("TicketReview", () => {
     expect(screen.getByText(/MARKET order, forced/)).toBeInTheDocument();
   });
 
-  it("approve shows the CLI next step and never claims execution happened", async () => {
+  it("approve (connected) shows the CLI next step and never claims execution happened", async () => {
     mockFetch([
+      { match: /\/api\/meta/, body: META_CONNECTED },
       {
         match: /\/api\/tickets\/7\/approve/,
         body: {
           status: "APPROVED",
           next_step: "uv run atlas execute --ticket-id 7",
-          note: "Execution is CLI-only.",
+          note: "Execution is CLI-only by design — the browser can never place an order.",
         },
       },
       { match: /\/api\/tickets$/, body: [TICKET] },
@@ -47,6 +51,21 @@ describe("TicketReview", () => {
     await screen.findByText(/nothing has been executed/i);
     expect(screen.getByText("uv run atlas execute --ticket-id 7")).toBeInTheDocument();
     expect(screen.getByText(/browser can never place an order/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("manual-howto")).not.toBeInTheDocument();
+  });
+
+  it("manual mode renders the place-it-yourself panel with the app path", async () => {
+    mockFetch([
+      { match: /\/api\/meta/, body: META_MANUAL },
+      { match: /\/api\/tickets$/, body: [TICKET] },
+    ]);
+    renderWithQuery(<TicketReview />);
+    await screen.findByText(/#7 BUY QQQM/);
+    const panel = await screen.findByTestId("manual-howto");
+    expect(panel).toHaveTextContent(/place this yourself in Robinhood/i);
+    expect(panel).toHaveTextContent(/Buy in Dollars/);
+    expect(panel).toHaveTextContent(/atlas filled --ticket-id 7/);
+    expect(screen.getByText(/place trades yourself in Robinhood/i)).toBeInTheDocument();
   });
 });
 

@@ -1,0 +1,15 @@
+# Manual-mode portfolio (BROKER_MODE=manual, the default).
+#
+# Copy to portfolio.yaml and keep it current by hand after every trade you
+# place in Robinhood. portfolio.yaml holds your REAL holdings and is
+# gitignored — never commit it; this example ships instead.
+#
+# cost_basis is the TOTAL dollars paid for the lot (not per-share).
+# settled_cash is what you can spend today; unsettled_cash is sale proceeds
+# still inside the T+1 settlement window (see RUNBOOK).
+
+holdings:
+  - {ticker: VOO, shares: 0.3500, cost_basis: 152.10}
+  - {ticker: SMH, shares: 0.2000, cost_basis: 84.00}
+settled_cash: 45.00
+unsettled_cash: 0.00

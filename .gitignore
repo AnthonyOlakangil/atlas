@@ -3,6 +3,9 @@
 *.pem
 *.key
 
+# Real holdings (manual broker mode) — never committed; ship the .example instead
+atlas/config/portfolio.yaml
+
 # Claude Code local settings
 .claude/settings.local.json
 

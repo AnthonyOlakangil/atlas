@@ -61,6 +61,19 @@ def reject(ticket_id: int = typer.Option(..., "--ticket-id")) -> None:
 
 
 @app.command()
+def filled(
+    ticket_id: int = typer.Option(..., "--ticket-id"),
+    price: float = typer.Option(..., "--price", help="Your actual fill price from the app."),
+) -> None:
+    """Manual broker mode: record a fill YOU placed in Robinhood (bookkeeping for scoring)."""
+    from decimal import Decimal
+
+    from atlas.execution.approval import record_manual_fill
+
+    record_manual_fill(ticket_id, Decimal(str(price)))
+
+
+@app.command()
 def report(track_record: bool = typer.Option(False, "--track-record")) -> None:
     """Render reports. --track-record: hit rate, alpha vs SPY, drawdown."""
     from atlas.portfolio.scoring import render_track_record

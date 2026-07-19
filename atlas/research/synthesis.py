@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from atlas.core.howto import robinhood_howto
 from atlas.core.llm import LLMClient, LLMError
 from atlas.core.logging import get_logger
 from atlas.core.models import (
@@ -116,33 +117,14 @@ def _fmt_claim(i: int, claim: Any) -> str:
 
 
 def _robinhood_howto(a: ApprovedIdea) -> str:
-    if a.idea.action in ("SELL", "TRIM"):
-        base = (
-            f"Open Robinhood → Search \"{a.idea.ticker}\" → ticker page → **Trade** → **Sell**. "
-        )
-        if a.is_fractional:
-            return base + (
-                "Choose **Sell in Dollars** — Robinhood runs fractional sells as **market** "
-                "orders (no price field), because fractional quantities are market-only."
-            )
-        return base + (
-            "Tap the order-type selector (top-right) → **Stop Limit Order** → set stop "
-            f"${a.limit_price} / limit a few cents below → **Shares**: {a.quantity} → Review → Submit."
-        )
-    base = (
-        f"Open Robinhood → Search \"{a.idea.ticker}\" → check the detail page (price vs 52-wk "
-        "range, expense ratio if ETF, P/E if stock) → **Trade** → **Buy**. "
-    )
-    if a.is_fractional:
-        return base + (
-            f"Robinhood switches to **Buy in Dollars** for ${a.sized_dollars:.2f} — this is a "
-            "**market** order with **no price field**, because fractional shares are "
-            "market-only on Robinhood. You get the next market price; there is no price cap."
-        )
-    return base + (
-        f"Tap the order-type selector → **Limit Order** → limit price ${a.limit_price} → "
-        f"**Shares**: {a.quantity} → good-for-day → Review → Submit. The order only fills at "
-        f"${a.limit_price} or better."
+    return robinhood_howto(
+        action=a.idea.action,
+        ticker=a.idea.ticker,
+        order_type=a.order_type,
+        is_fractional=a.is_fractional,
+        quantity=a.quantity,
+        dollar_amount=a.sized_dollars,
+        limit_price=a.limit_price,
     )
 
 

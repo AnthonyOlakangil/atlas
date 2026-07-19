@@ -13,7 +13,17 @@ Operations manual for Atlas. Written for the operator; assumes the README setup 
 
 **Quota:** free tier ≈ 10 requests/min and ≈ 1,500/day. Atlas caps itself at ≤ 8/min. The daily quota resets at **midnight Pacific** (not rolling) — heavy debugging days can exhaust it; it comes back at midnight.
 
-### Robinhood MCP
+### Broker mode: manual (default) vs connected
+
+`BROKER_MODE=manual` (the default) runs Atlas with **no broker link at all**:
+- Your holdings live in `atlas/config/portfolio.yaml` (copy `portfolio.example.yaml`; `cost_basis` is TOTAL dollars paid per lot). **Keep it current by hand after every trade** — it is the book Atlas reasons against, and it is gitignored because it holds your real positions.
+- Market data comes from yfinance. No OAuth, no account access.
+- `atlas execute` is **inert** — it tells you the broker isn't connected and points to the ticket's "Robinhood how-to". You place the trade yourself in the app, then record it so scoring works: `uv run atlas filled --ticket-id <id> --price <your fill>` … and update portfolio.yaml.
+- Sizing, sleeve drift, and the settled-cash rule all run on the yaml numbers. GFV tracking is on you and your broker in manual mode — Atlas has no order history to derive it from.
+
+`BROKER_MODE=connected` enables the Robinhood MCP path below.
+
+### Robinhood MCP (connected mode only)
 - URL: `https://agent.robinhood.com/mcp/trading`.
 - Auth is an **OAuth handshake you complete in your browser** — Atlas never sees or stores your Robinhood password.
 - The MCP has **read access to ALL your Robinhood accounts** but **trade access ONLY to the Agentic account** (a separate account from your primary brokerage). Atlas labels which account every figure comes from.

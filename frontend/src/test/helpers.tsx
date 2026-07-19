@@ -54,4 +54,9 @@ export const TICKET = {
   learning_note: "Fractional shares trade as market orders only on Robinhood.",
   exit_stop: 212.06,
   exit_target: 276.6,
+  robinhood_howto:
+    'Open Robinhood → Search "QQQM" → **Trade** → **Buy**. Robinhood switches to **Buy in Dollars** for $55.00 — a **market** order with no price field.',
 };
+
+export const META_MANUAL = { broker_mode: "manual", atlas_mode: "PAPER" };
+export const META_CONNECTED = { broker_mode: "connected", atlas_mode: "PAPER" };

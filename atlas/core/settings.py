@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     llm_model: str = "gemini-3-flash"
 
     atlas_mode: Literal["PAPER", "LIVE"] = "PAPER"
+    # manual (default): no broker link — portfolio.yaml is the book, execution is inert.
+    # connected: the Robinhood MCP path (OAuth, live reads, gated execution).
+    broker_mode: Literal["manual", "connected"] = "manual"
     atlas_db_path: str = "atlas.db"
 
     fred_api_key: str = ""

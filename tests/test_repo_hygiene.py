@@ -37,6 +37,7 @@ EXPECTED_ROOT = {
 
 REQUIRED_GITIGNORE_PATTERNS = [
     ".env",
+    "atlas/config/portfolio.yaml",  # real holdings — never committed
     "__pycache__/",
     "*.pyc",
     ".venv/",

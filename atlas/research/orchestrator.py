@@ -29,7 +29,7 @@ from atlas.ingest.macro import MacroContext, build_macro_context
 from atlas.ingest.market import MarketReader, MarketSnapshot, build_market_snapshot
 from atlas.ingest.news import NewsDigest, fetch_news
 from atlas.ingest.social import SentimentReport, SocialPost, analyze_sentiment
-from atlas.portfolio.state import PortfolioState, load_paper_state
+from atlas.portfolio.state import PortfolioState, load_portfolio_state
 from atlas.research.agents.risk import run_risk_agent
 from atlas.research.agents.runners import (
     run_macro_agent,
@@ -138,8 +138,16 @@ def run_cycle(
     macro = build_macro_context(settings.fred_api_key, sources.get("fred", {}))
     _dump_stage(stage_dir, "macro_context", {"series": {k: v.value for k, v in macro.series.items()}})
 
+    # manual mode: make sure held tickers get priced even if outside the watchlist
+    state_probe = load_portfolio_state(session, {}, datetime.now(UTC).date())
+    held = [p.ticker for p in state_probe.positions if p.ticker not in snapshot.quotes]
+    if held:
+        held_snap = build_market_snapshot(held, reader=mcp_reader, index_symbols=())
+        snapshot.quotes.update(held_snap.quotes)
+        snapshot.anomalies.extend(held_snap.anomalies)
+
     prices = {s: Decimal(str(q.price)) for s, q in snapshot.quotes.items()}
-    state = load_paper_state(session, prices, datetime.now(UTC).date())
+    state = load_portfolio_state(session, prices, datetime.now(UTC).date())
 
     bundle = build_research_bundle(
         llm=llm,

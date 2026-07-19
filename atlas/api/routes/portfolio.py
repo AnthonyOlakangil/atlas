@@ -10,11 +10,17 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from atlas.api.deps import QuoteFn, get_quotes, get_session
-from atlas.core.settings import get_operator_config
+from atlas.core.settings import get_operator_config, get_settings
 from atlas.portfolio.drift import compute_drift
-from atlas.portfolio.state import load_paper_state
+from atlas.portfolio.state import load_portfolio_state
 
 router = APIRouter(tags=["portfolio"])
+
+
+@router.get("/meta")
+def meta() -> dict[str, str]:
+    s = get_settings()
+    return {"broker_mode": s.broker_mode, "atlas_mode": s.atlas_mode}
 
 
 @router.get("/portfolio")
@@ -23,9 +29,9 @@ def portfolio(
 ) -> dict[str, Any]:
     cfg = get_operator_config()
     now = datetime.now(UTC)
-    state = load_paper_state(session, {}, now.date())
+    state = load_portfolio_state(session, {}, now.date())
     prices = quotes([p.ticker for p in state.positions])
-    state = load_paper_state(session, prices, now.date())
+    state = load_portfolio_state(session, prices, now.date())
 
     drift = {
         d.sleeve: {
