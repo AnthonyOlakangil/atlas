@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -99,6 +100,16 @@ def _holdings_summary(state: PortfolioState) -> str:
     return "\n".join(lines)
 
 
+@dataclass
+class CycleData:
+    bundle: ResearchBundle
+    assessment: RiskAssessment
+    state: PortfolioState
+    snapshot: MarketSnapshot
+    macro: MacroContext
+    llm: LLMClient
+
+
 def run_cycle(
     *,
     session: Session,
@@ -106,7 +117,7 @@ def run_cycle(
     mcp_reader: MarketReader | None = None,
     reddit_posts: list[SocialPost] | None = None,
     watchlist: list[str] | None = None,
-) -> tuple[ResearchBundle, RiskAssessment, PortfolioState]:
+) -> CycleData:
     """Ingest → analysts → risk. Synthesis/critic run downstream (synthesis.py)."""
     setup_logging()
     settings = get_settings()
@@ -142,17 +153,23 @@ def run_cycle(
     )
     assessment = run_risk_agent(bundle, state, cfg, prices)
     _dump_stage(stage_dir, "risk_assessment", assessment)
-    return bundle, assessment, state
+    return CycleData(
+        bundle=bundle, assessment=assessment, state=state,
+        snapshot=snapshot, macro=macro, llm=llm,
+    )
 
 
-def run_daily_cycle() -> None:
-    """CLI entrypoint: full cycle + brief synthesis + critic (extended in synthesis.py)."""
+def run_daily_cycle(kind: str = "preopen") -> None:
+    """CLI entrypoint: full cycle → synthesis → critic → persisted brief + tickets."""
     from atlas.core.db import session_scope
     from atlas.research.synthesis import synthesize_and_persist
 
     with session_scope() as session:
-        bundle, assessment, state = run_cycle(session=session)
-        synthesize_and_persist(session, bundle, assessment, state)
+        data = run_cycle(session=session)
+        synthesize_and_persist(
+            session, data.bundle, data.assessment, data.state,
+            snapshot=data.snapshot, macro=data.macro, llm=data.llm, kind=kind,
+        )
 
 
 def run_scheduler() -> None:

@@ -208,5 +208,6 @@ class GlossaryTerm(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     term: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     definition: Mapped[str] = mapped_column(Text)
-    first_shown_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # null until the term first appears in a rendered brief — powers first-use injection
+    first_shown_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     source_url: Mapped[str] = mapped_column(String(1024), default="")

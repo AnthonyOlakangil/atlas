@@ -81,6 +81,18 @@ class FakeLLMClient:
             return canned_sector_view()
         if schema is AnalystView:
             return canned_analyst_view(agent or "analyst")
+        if schema.__name__ == "SynthesisNarrative":
+            return schema(
+                tldr=[
+                    "Market steady; chips rotating beneath the surface.",
+                    "Three sized proposals today, all inside bands with settled cash to spare.",
+                    "Fed stays hawkish — expensive growth carries rate risk.",
+                ],
+                teaching_note="A limit order caps what you pay; a market order guarantees the fill instead.",
+                no_trade_rationale="No setups cleared the risk gate.",
+            )
+        if schema.__name__ == "LLMCritique":
+            return schema(defects=[], verdict="clean")
         raise AssertionError(f"FakeLLMClient has no canned response for {schema}")
 
 DEFAULT_RESPONSES: dict[str, Any] = {
