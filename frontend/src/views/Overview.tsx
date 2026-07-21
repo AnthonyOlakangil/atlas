@@ -70,7 +70,14 @@ export default function Overview() {
             <div className="h-64">
               <ResponsiveContainer>
                 <PieChart>
-                  <Pie data={pie} dataKey="value" nameKey="name" innerRadius={50} outerRadius={90}>
+                  <Pie
+                    data={pie}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={50}
+                    outerRadius={90}
+                    isAnimationActive={false}
+                  >
                     {pie.map((entry) => (
                       <Cell key={entry.name} fill={SLEEVE_COLORS[entry.name] ?? "#71717a"} />
                     ))}

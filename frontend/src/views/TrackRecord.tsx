@@ -69,7 +69,7 @@ export default function TrackRecord() {
                   <XAxis dataKey="bin" stroke="#71717a" fontSize={10} />
                   <YAxis allowDecimals={false} stroke="#71717a" fontSize={11} />
                   <Tooltip />
-                  <Bar dataKey="count">
+                  <Bar dataKey="count" isAnimationActive={false}>
                     {data.alpha_histogram.map((h) => (
                       <Cell key={h.bin} fill={h.lo >= 0 ? "#34d399" : "#fb7185"} />
                     ))}
@@ -89,7 +89,7 @@ export default function TrackRecord() {
                   <XAxis dataKey="date" stroke="#71717a" fontSize={10} />
                   <YAxis stroke="#71717a" fontSize={11} tickFormatter={(v) => `${v}%`} />
                   <Tooltip formatter={(v: number) => `${v.toFixed(2)}%`} />
-                  <Area type="monotone" dataKey="drawdown" stroke="#fb7185" fill="#fb718533" />
+                  <Area type="monotone" dataKey="drawdown" stroke="#fb7185" fill="#fb718533" isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

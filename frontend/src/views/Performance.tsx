@@ -58,8 +58,8 @@ export default function Performance() {
                 <YAxis stroke="#71717a" fontSize={11} tickFormatter={(v) => `${v}%`} />
                 <Tooltip formatter={(v: number) => `${v.toFixed(2)}%`} />
                 <Legend />
-                <Line type="monotone" dataKey="atlas" name="Atlas (paper)" stroke="#38bdf8" dot={false} />
-                <Line type="monotone" dataKey="spy" name="SPY" stroke="#a1a1aa" dot={false} />
+                <Line type="monotone" dataKey="atlas" name="Atlas (paper)" stroke="#38bdf8" dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="spy" name="SPY" stroke="#a1a1aa" dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
