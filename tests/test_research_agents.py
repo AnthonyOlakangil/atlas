@@ -254,6 +254,61 @@ def test_risk_trim_skipped_when_sleeve_already_at_floor() -> None:
     assert any("already at/below" in w for w in assessment.watch_items)
 
 
+def test_risk_multiple_buys_jointly_fundable_from_settled_cash() -> None:
+    """Regression (2026-07-21 live run): two buys were each sized against the same
+    $45 settled cash, together committing $60. Approved buys must be JOINTLY
+    fundable — later buys size against cash the earlier ones already spent (§2.1)."""
+    cash = CashState(settled=Decimal("45"), unsettled=Decimal(0))
+    state = PortfolioState(
+        as_of=date(2026, 7, 21),
+        positions=[
+            PositionView(ticker="VOO", sleeve="core", shares=Decimal("0.35"),
+                         cost_basis=Decimal("152"), price=Decimal("687"), value=Decimal("240.45")),
+            PositionView(ticker="SMH", sleeve="satellite_ai_semis", shares=Decimal("0.2"),
+                         cost_basis=Decimal("84"), price=Decimal("585"), value=Decimal("117.00")),
+        ],
+        cash=cash, ledger=Ledger(cash=cash, gfv_events=[], open_lots=[]),
+    )  # total ~$402; both sleeves that follow are empty and in-band-reachable
+    prices = {"GLDM": Decimal("80.15"), "IBIT": Decimal("37.50")}
+    ideas = [
+        _idea(ticker="GLDM", sleeve="diversifier", action="BUY", target_dollars=45.0, confidence=0.9),
+        _idea(ticker="IBIT", sleeve="speculative", action="BUY", target_dollars=15.0, confidence=0.7),
+    ]
+    assessment = run_risk_agent(_bundle_with_ideas(ideas), state, CFG, prices)
+
+    total_buy_spend = sum(a.sized_dollars for a in assessment.approved if a.idea.action == "BUY")
+    assert total_buy_spend <= 45.0 + 0.01, f"buys over-committed settled cash: ${total_buy_spend}"
+    # GLDM (higher confidence) takes the settled cash; IBIT can't be funded → watch item
+    approved_buys = {a.idea.ticker for a in assessment.approved if a.idea.action == "BUY"}
+    assert "GLDM" in approved_buys
+    assert "IBIT" not in approved_buys
+    assert any("IBIT" in w for w in assessment.watch_items)
+
+
+def test_risk_second_buy_funded_after_first_leaves_room() -> None:
+    """Two small buys that DO both fit are both approved, with correct running cash."""
+    cash = CashState(settled=Decimal("60"), unsettled=Decimal(0))
+    state = PortfolioState(
+        as_of=date(2026, 7, 21),
+        positions=[
+            PositionView(ticker="VOO", sleeve="core", shares=Decimal("0.35"),
+                         cost_basis=Decimal("152"), price=Decimal("687"), value=Decimal("240.45")),
+        ],
+        cash=cash, ledger=Ledger(cash=cash, gfv_events=[], open_lots=[]),
+    )
+    prices = {"GLDM": Decimal("80.15"), "IBIT": Decimal("37.50")}
+    ideas = [
+        _idea(ticker="GLDM", sleeve="diversifier", action="BUY", target_dollars=25.0, confidence=0.9),
+        _idea(ticker="IBIT", sleeve="speculative", action="BUY", target_dollars=12.0, confidence=0.7),
+    ]
+    assessment = run_risk_agent(_bundle_with_ideas(ideas), state, CFG, prices)
+    approved = {a.idea.ticker: a for a in assessment.approved}
+    assert set(approved) >= {"GLDM", "IBIT"}
+    # IBIT sized after GLDM spent $25 → IBIT sees $35 remaining, not the original $60
+    assert approved["IBIT"].cash_before == 35.0
+    assert approved["GLDM"].sized_dollars + approved["IBIT"].sized_dollars <= 60.0
+
+
 def test_risk_full_sell_not_band_clamped() -> None:
     """A SELL (thesis exit) is NOT a rebalance and may take the sleeve to zero."""
     cash = CashState(settled=Decimal("400"), unsettled=Decimal(0))

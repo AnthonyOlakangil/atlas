@@ -8,13 +8,14 @@ and reasons portfolio-first (§2.0.1).
 
 from __future__ import annotations
 
+import copy
 from decimal import ROUND_DOWN, Decimal
 
 from atlas.core.logging import get_logger
 from atlas.core.settings import OperatorConfig
 from atlas.portfolio.drift import BandStatus, compute_drift
 from atlas.portfolio.sizing import SECTOR_MAP, size_buy
-from atlas.portfolio.state import PortfolioState
+from atlas.portfolio.state import PortfolioState, PositionView
 from atlas.research.agents.schemas import (
     ApprovedIdea,
     ResearchBundle,
@@ -26,6 +27,45 @@ from atlas.research.agents.schemas import (
 log = get_logger("research.risk")
 
 MAX_TICKETS_PER_DAY = 3  # §12: force prioritization
+
+
+def _apply_fill(
+    work: PortfolioState,
+    *,
+    ticker: str,
+    sleeve: str,
+    is_buy: bool,
+    shares: Decimal,
+    dollars: Decimal,
+    price: Decimal,
+) -> None:
+    """Update the working state so later proposals in the SAME cycle see this trade.
+
+    A buy spends settled cash and adds equity; a sell/trim removes equity and adds
+    UNSETTLED proceeds (which cannot fund a same-cycle buy — T+1, §2.1). This is what
+    makes the day's ticket set JOINTLY fundable rather than each ticket independently
+    sized against the same starting cash.
+    """
+    pos = next((p for p in work.positions if p.ticker == ticker), None)
+    if is_buy:
+        work.cash.settled = work.cash.settled - dollars
+        if pos is None:
+            work.positions.append(
+                PositionView(
+                    ticker=ticker, sleeve=sleeve, shares=shares, cost_basis=dollars,
+                    price=price, value=(shares * price).quantize(Decimal("0.01")),
+                )
+            )
+        else:
+            pos.shares = pos.shares + shares
+            pos.value = (pos.shares * price).quantize(Decimal("0.01"))
+    else:
+        work.cash.unsettled = work.cash.unsettled + dollars
+        if pos is not None:
+            pos.shares = pos.shares - shares
+            pos.value = (pos.shares * price).quantize(Decimal("0.01"))
+            if pos.shares <= 0:
+                work.positions.remove(pos)
 
 
 def _portfolio_impact(
@@ -95,6 +135,10 @@ def run_risk_agent(
         f"{gfv} GFV(s) on record" + (" — ACCOUNT RESTRICTION RISK" if state.ledger.gfv_restricted else "")
     )
 
+    # Drift/GFV above reflect the real starting book. From here, `work` evolves as
+    # trades are approved so the cycle's tickets are jointly fundable (§2.1).
+    work = copy.deepcopy(state)
+
     ideas = sorted(bundle.sector.trade_ideas, key=lambda i: -i.confidence)
     approved_count = 0
     for idea in ideas:
@@ -116,7 +160,7 @@ def run_risk_agent(
                     )
                 )
                 continue
-            held = next((p for p in state.positions if p.ticker == idea.ticker), None)
+            held = next((p for p in work.positions if p.ticker == idea.ticker), None)
             if held is None or held.shares <= 0:
                 assessment.vetoed.append(Veto(ticker=idea.ticker, reason="no position to sell (long-only)"))
                 continue
@@ -126,8 +170,8 @@ def run_risk_agent(
             # floor. A full SELL (thesis exit) is not band-clamped; it may go to 0.
             trim_note: str | None = None
             if idea.action == "TRIM":
-                total = state.total_value
-                sleeve_val = state.sleeve_weights().get(idea.sleeve, Decimal(0)) * total
+                total = work.total_value
+                sleeve_val = work.sleeve_weights().get(idea.sleeve, Decimal(0)) * total
                 band_lo = (
                     Decimal(str(cfg.sleeves[idea.sleeve].target_pct[0]))
                     if idea.sleeve in cfg.sleeves
@@ -164,26 +208,31 @@ def run_risk_agent(
                     order_type="market" if is_frac else "stop_limit",
                     limit_price=None if is_frac else float((price * Decimal("0.995")).quantize(Decimal("0.01"))),
                     is_fractional=is_frac,
-                    cash_before=float(state.cash.settled),
-                    cash_after=float(state.cash.settled),  # proceeds are UNSETTLED until T+1
+                    cash_before=float(work.cash.settled),
+                    cash_after=float(work.cash.settled),  # proceeds are UNSETTLED until T+1
                     sizing_notes=[
                         f"{idea.action} {sell_shares} sh of {held.shares} held",
                         *( [trim_note] if trim_note else [] ),
                         "proceeds settle T+1 — not spendable until then",
                     ],
-                    portfolio_impact=_portfolio_impact(idea, -proceeds, state, cfg),
+                    portfolio_impact=_portfolio_impact(idea, -proceeds, work, cfg),
                 )
+            )
+            _apply_fill(
+                work, ticker=idea.ticker, sleeve=idea.sleeve, is_buy=False,
+                shares=sell_shares, dollars=proceeds, price=price,
             )
             approved_count += 1
             continue
 
-        # BUY
+        # BUY — sized against `work` so cumulative settled-cash spend across the
+        # cycle's buys can never exceed available settled cash (§2.1).
         decision = size_buy(
             ticker=idea.ticker,
             sleeve=idea.sleeve,
             price=price,
             target_dollars=Decimal(str(idea.target_dollars)),
-            state=state,
+            state=work,
             cfg=cfg,
             is_diversified_fund=idea.is_diversified_fund,
         )
@@ -209,8 +258,12 @@ def run_risk_agent(
                 cash_before=float(decision.cash_before),
                 cash_after=float(decision.cash_after),
                 sizing_notes=decision.reasons,
-                portfolio_impact=_portfolio_impact(idea, decision.dollar_amount, state, cfg),
+                portfolio_impact=_portfolio_impact(idea, decision.dollar_amount, work, cfg),
             )
+        )
+        _apply_fill(
+            work, ticker=idea.ticker, sleeve=idea.sleeve, is_buy=True,
+            shares=decision.quantity, dollars=decision.dollar_amount, price=price,
         )
         approved_count += 1
 
