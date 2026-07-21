@@ -8,7 +8,7 @@ and reasons portfolio-first (§2.0.1).
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from atlas.core.logging import get_logger
 from atlas.core.settings import OperatorConfig
@@ -51,11 +51,21 @@ def _portfolio_impact(
         if overlaps
         else "no direct sector overlap with current holdings"
     )
-    cash_after = state.cash.settled - spend
+    if idea.action in ("SELL", "TRIM"):
+        # `spend` is negative for a sell (equity leaves the sleeve). Proceeds settle
+        # T+1, so settled cash is unchanged today — it moves to unsettled (§2.1).
+        proceeds = -spend
+        cash_note = (
+            f"settled cash ${state.cash.settled} unchanged (${proceeds} proceeds "
+            "settle T+1, then spendable)"
+        )
+    else:
+        cash_after = state.cash.settled - spend
+        cash_note = f"settled cash ${state.cash.settled} → ${cash_after}"
     return (
         f"{idea.sleeve} sleeve {float(sleeve_before):.1%} → {float(sleeve_after):.1%} "
         f"({'in band' if in_band else 'OUT OF BAND'} {band[0]:.0%}–{band[1]:.0%}); "
-        f"{corr_note}; settled cash ${state.cash.settled} → ${cash_after}"
+        f"{corr_note}; {cash_note}"
     )
 
 
@@ -110,8 +120,36 @@ def run_risk_agent(
             if held is None or held.shares <= 0:
                 assessment.vetoed.append(Veto(ticker=idea.ticker, reason="no position to sell (long-only)"))
                 continue
+            sell_dollars = Decimal(str(idea.target_dollars))
+            # A TRIM rebalances an overweight — it must never push the sleeve BELOW
+            # its band floor and create a new underweight. Clamp to the band_lo
+            # floor. A full SELL (thesis exit) is not band-clamped; it may go to 0.
+            trim_note: str | None = None
+            if idea.action == "TRIM":
+                total = state.total_value
+                sleeve_val = state.sleeve_weights().get(idea.sleeve, Decimal(0)) * total
+                band_lo = (
+                    Decimal(str(cfg.sleeves[idea.sleeve].target_pct[0]))
+                    if idea.sleeve in cfg.sleeves
+                    else Decimal(0)
+                )
+                max_trim = (sleeve_val - band_lo * total).quantize(Decimal("0.01"))
+                if max_trim <= 0:
+                    assessment.watch_items.append(
+                        f"{idea.ticker}: TRIM skipped — {idea.sleeve} already at/below its "
+                        f"band floor {float(band_lo):.0%}; trimming would deepen the underweight"
+                    )
+                    continue
+                if sell_dollars > max_trim:
+                    trim_note = (
+                        f"trim clamped to ${max_trim} so {idea.sleeve} lands at its band floor "
+                        f"{float(band_lo):.0%} (LLM asked ${sell_dollars}, would have overshot below band)"
+                    )
+                    sell_dollars = max_trim
+            # Round shares DOWN: a clamped trim must never cross its floor, and a
+            # sell must never exceed the position, on rounding.
             sell_shares = min(
-                held.shares, (Decimal(str(idea.target_dollars)) / price).quantize(Decimal("0.0001"))
+                held.shares, (sell_dollars / price).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
             )
             is_frac = sell_shares != sell_shares.to_integral_value()
             proceeds = (sell_shares * price).quantize(Decimal("0.01"))
@@ -130,6 +168,7 @@ def run_risk_agent(
                     cash_after=float(state.cash.settled),  # proceeds are UNSETTLED until T+1
                     sizing_notes=[
                         f"{idea.action} {sell_shares} sh of {held.shares} held",
+                        *( [trim_note] if trim_note else [] ),
                         "proceeds settle T+1 — not spendable until then",
                     ],
                     portfolio_impact=_portfolio_impact(idea, -proceeds, state, cfg),

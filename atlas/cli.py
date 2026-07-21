@@ -100,5 +100,27 @@ def schedule() -> None:
     start_scheduler()
 
 
+def main() -> None:
+    """Entrypoint (see pyproject.toml [project.scripts]).
+
+    Known, already-clearly-messaged operational errors (missing API key, gate
+    violations, malformed portfolio.yaml, broker/network failures) are caught
+    here and printed as a one-line message — never a stack trace (§3.1, §12).
+    Anything else is a real bug and should surface with its full traceback.
+    """
+    import sys
+
+    from atlas.core.llm import LLMError
+    from atlas.execution.approval import ApprovalError
+    from atlas.execution.transport import MCPToolError, MCPTransportError
+    from atlas.portfolio.state import PortfolioConfigError
+
+    try:
+        app()
+    except (LLMError, ApprovalError, PortfolioConfigError, MCPTransportError, MCPToolError) as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
-    app()
+    main()

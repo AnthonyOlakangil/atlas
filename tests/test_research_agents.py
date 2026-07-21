@@ -205,3 +205,71 @@ def test_risk_trim_of_held_position_notes_t1_settlement() -> None:
     assert a.quantity == "1.0000" and not a.is_fractional
     assert any("T+1" in n for n in a.sizing_notes)
     assert a.cash_after == a.cash_before  # proceeds unsettled — cash unchanged today
+
+
+def test_risk_trim_clamped_to_band_floor_never_overshoots() -> None:
+    """Regression (2026-07-20 live run): an over-large TRIM must not push the sleeve
+    below its band floor. Book: $1000 total, SMH sleeve at 28% ($280), floor 20%."""
+    cash = CashState(settled=Decimal("400"), unsettled=Decimal(0))
+    state = PortfolioState(
+        as_of=date(2026, 7, 20),
+        positions=[
+            PositionView(ticker="SMH", sleeve="satellite_ai_semis", shares=Decimal("0.5"),
+                         cost_basis=Decimal("250"), price=Decimal("560"), value=Decimal("280")),
+            PositionView(ticker="VOO", sleeve="core", shares=Decimal("0.5"),
+                         cost_basis=Decimal("300"), price=Decimal("640"), value=Decimal("320")),
+        ],
+        cash=cash, ledger=Ledger(cash=cash, gfv_events=[], open_lots=[]),
+    )  # total 1000; satellite 28%, floor 20% → max trim = 280 - 200 = $80
+    prices = {"SMH": Decimal("560")}
+    # LLM asks to trim the near-entire $270 position — must clamp to $80
+    assessment = run_risk_agent(
+        _bundle_with_ideas([_idea(action="TRIM", ticker="SMH", target_dollars=270.0)]),
+        state, CFG, prices,
+    )
+    assert len(assessment.approved) == 1
+    a = assessment.approved[0]
+    assert a.sized_dollars <= 80.0, "trim overshot the band floor"
+    assert any("clamped" in n for n in a.sizing_notes)
+    assert "OUT OF BAND" not in a.portfolio_impact  # lands in band now
+    # and the portfolio_impact must NOT claim settled cash grew (proceeds are T+1)
+    assert "unchanged" in a.portfolio_impact and "→ $480" not in a.portfolio_impact
+
+
+def test_risk_trim_skipped_when_sleeve_already_at_floor() -> None:
+    cash = CashState(settled=Decimal("850"), unsettled=Decimal(0))
+    state = PortfolioState(
+        as_of=date(2026, 7, 20),
+        positions=[
+            PositionView(ticker="SMH", sleeve="satellite_ai_semis", shares=Decimal("0.1"),
+                         cost_basis=Decimal("100"), price=Decimal("560"), value=Decimal("56"))
+        ],
+        cash=cash, ledger=Ledger(cash=cash, gfv_events=[], open_lots=[]),
+    )  # total ~906; satellite ~6%, already below the 20% floor
+    assessment = run_risk_agent(
+        _bundle_with_ideas([_idea(action="TRIM", ticker="SMH", target_dollars=30.0)]),
+        state, CFG, {"SMH": Decimal("560")},
+    )
+    assert not assessment.approved
+    assert any("already at/below" in w for w in assessment.watch_items)
+
+
+def test_risk_full_sell_not_band_clamped() -> None:
+    """A SELL (thesis exit) is NOT a rebalance and may take the sleeve to zero."""
+    cash = CashState(settled=Decimal("400"), unsettled=Decimal(0))
+    state = PortfolioState(
+        as_of=date(2026, 7, 20),
+        positions=[
+            PositionView(ticker="SMH", sleeve="satellite_ai_semis", shares=Decimal("0.5"),
+                         cost_basis=Decimal("250"), price=Decimal("560"), value=Decimal("280")),
+            PositionView(ticker="VOO", sleeve="core", shares=Decimal("0.5"),
+                         cost_basis=Decimal("300"), price=Decimal("640"), value=Decimal("320")),
+        ],
+        cash=cash, ledger=Ledger(cash=cash, gfv_events=[], open_lots=[]),
+    )
+    assessment = run_risk_agent(
+        _bundle_with_ideas([_idea(action="SELL", ticker="SMH", target_dollars=280.0)]),
+        state, CFG, {"SMH": Decimal("560")},
+    )
+    assert len(assessment.approved) == 1
+    assert assessment.approved[0].sized_dollars == 280.0  # full exit, not clamped

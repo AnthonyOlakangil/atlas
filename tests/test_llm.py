@@ -21,7 +21,7 @@ from atlas.core.llm import (
 from atlas.core.settings import Settings
 from atlas.research.agents.schemas import AnalystView
 
-URL = f"{GEMINI_BASE}/gemini-3-flash:generateContent"
+URL = f"{GEMINI_BASE}/gemini-3.5-flash:generateContent"
 
 VALID_VIEW = {
     "agent": "market-data",

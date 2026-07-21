@@ -55,7 +55,7 @@ def test_settings_defaults_paper_mode(monkeypatch) -> None:
     assert s.atlas_mode == "PAPER"
     assert s.broker_mode == "manual"  # no-broker path is the default
     assert s.llm_provider == "gemini"
-    assert s.llm_model == "gemini-3-flash"
+    assert s.llm_model == "gemini-3.5-flash"
     assert s.db_url.startswith("sqlite:///")
 
 

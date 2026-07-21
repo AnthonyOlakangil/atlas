@@ -139,7 +139,10 @@ def structural_review(
 
     if assessment is not None:
         for a in assessment.approved:
-            if a.sized_dollars > a.cash_before + 0.01:
+            # A cash violation only applies to BUYs: sized_dollars is money SPENT.
+            # For SELL/TRIM, sized_dollars is proceeds RECEIVED (unsettled T+1),
+            # so comparing it to settled cash is meaningless.
+            if a.idea.action == "BUY" and a.sized_dollars > a.cash_before + 0.01:
                 defects.append(
                     Defect("cash_violation", f"{a.idea.ticker}: spend {a.sized_dollars} exceeds "
                            f"settled cash {a.cash_before} (§2.1)")

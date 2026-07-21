@@ -75,7 +75,7 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = ""
     llm_provider: Literal["gemini", "ollama", "anthropic", "fake"] = "gemini"
-    llm_model: str = "gemini-3-flash"
+    llm_model: str = "gemini-3.5-flash"
 
     atlas_mode: Literal["PAPER", "LIVE"] = "PAPER"
     # manual (default): no broker link — portfolio.yaml is the book, execution is inert.

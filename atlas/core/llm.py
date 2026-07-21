@@ -114,7 +114,7 @@ class GeminiClient:
     def __init__(
         self,
         api_key: str,
-        model: str = "gemini-3-flash",
+        model: str = "gemini-3.5-flash",
         limiter: TokenBucketLimiter | None = None,
         usage_log_path: Path | None = None,
         sleep: Callable[[float], None] = time.sleep,

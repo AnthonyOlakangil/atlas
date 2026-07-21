@@ -116,6 +116,32 @@ def test_critic_passes_generated_brief(db_session: Session) -> None:
     assert report.passes, report.summary()
 
 
+def test_critic_does_not_flag_trim_proceeds_as_cash_violation() -> None:
+    """Regression: a TRIM's proceeds ($85) exceed settled cash ($45), but that is
+    money RECEIVED, not spent — the critic must not call it a cash_violation.
+    Surfaced by the 2026-07-20 live run rejecting a legitimate SMH trim twice."""
+    from atlas.research.agents.schemas import ApprovedIdea, RiskAssessment, TradeIdea
+
+    trim = ApprovedIdea(
+        idea=TradeIdea(
+            ticker="SMH", sleeve="satellite_ai_semis", action="TRIM", target_dollars=85.0,
+            thesis="t", catalyst="c", risk="r", bear_case="b", falsifier="f",
+            time_horizon="weeks", confidence=0.7,
+        ),
+        sized_dollars=85.0, quantity="0.2000", order_type="market", is_fractional=True,
+        cash_before=45.0, cash_after=45.0,  # proceeds unsettled → cash unchanged today
+        portfolio_impact="trims overweight SMH; proceeds settle T+1",
+    )
+    codes = {d.code for d in structural_review("", RiskAssessment(approved=[trim]))}
+    assert "cash_violation" not in codes
+
+    # a real BUY overspend still fires
+    overspend = trim.model_copy(deep=True)
+    overspend.idea.action = "BUY"
+    codes2 = {d.code for d in structural_review("", RiskAssessment(approved=[overspend]))}
+    assert "cash_violation" in codes2
+
+
 # --- tickets ------------------------------------------------------------------
 
 

@@ -42,7 +42,7 @@ build-backend = "hatchling.build"
 packages = ["atlas"]
 
 [project.scripts]
-atlas = "atlas.cli:app"
+atlas = "atlas.cli:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

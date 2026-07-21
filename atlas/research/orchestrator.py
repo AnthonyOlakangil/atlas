@@ -15,10 +15,11 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -80,6 +81,14 @@ def build_research_bundle(
             macro=f_macro.result(),
             sector=f_sector.result(),
         )
+    # Retrieval timestamps are a fact Atlas knows, never the LLM's to invent.
+    # Models otherwise hallucinate training-era dates (e.g. 2023) onto synthesized
+    # findings. Stamp every claim with the real time this cycle retrieved its data.
+    stamp = snapshot.as_of.isoformat()
+    for view in bundle.all_views():
+        for claim in view.key_findings:
+            claim.retrieved_at = stamp
+
     for view in bundle.all_views():
         bundle.anomalies.extend(view.anomalies)
     if stage_dir is not None:
@@ -125,6 +134,9 @@ def run_cycle(
     sources = load_sources()
     stage_dir = run_dir()
     llm = llm or build_llm_client(settings)
+    # The brief's date is the operator's local trading day (§12: America/Los_Angeles
+    # throughout) — not UTC, which rolls a day ahead every evening Pacific.
+    today = datetime.now(ZoneInfo(settings.timezone)).date()
 
     snapshot = build_market_snapshot(watchlist or DEFAULT_WATCHLIST, reader=mcp_reader)
     _dump_stage(stage_dir, "market_snapshot", snapshot)
@@ -139,7 +151,7 @@ def run_cycle(
     _dump_stage(stage_dir, "macro_context", {"series": {k: v.value for k, v in macro.series.items()}})
 
     # manual mode: make sure held tickers get priced even if outside the watchlist
-    state_probe = load_portfolio_state(session, {}, datetime.now(UTC).date())
+    state_probe = load_portfolio_state(session, {}, today)
     held = [p.ticker for p in state_probe.positions if p.ticker not in snapshot.quotes]
     if held:
         held_snap = build_market_snapshot(held, reader=mcp_reader, index_symbols=())
@@ -147,7 +159,7 @@ def run_cycle(
         snapshot.anomalies.extend(held_snap.anomalies)
 
     prices = {s: Decimal(str(q.price)) for s, q in snapshot.quotes.items()}
-    state = load_portfolio_state(session, prices, datetime.now(UTC).date())
+    state = load_portfolio_state(session, prices, today)
 
     bundle = build_research_bundle(
         llm=llm,
