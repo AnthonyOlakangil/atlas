@@ -40,8 +40,8 @@ PRICES = {
 
 YAML = """\
 holdings:
-  - {ticker: VOO, shares: 0.3500, cost_basis: 152.10}
-  - {ticker: SMH, shares: 0.2000, cost_basis: 84.00}
+  - {ticker: VOO, sleeve: core, shares: 0.3500, cost_basis: 152.10}
+  - {ticker: SMH, sleeve: satellite_ai_semis, shares: 0.2000, cost_basis: 84.00}
 settled_cash: 45.00
 unsettled_cash: 12.00
 """
@@ -74,23 +74,40 @@ def test_manual_state_parses_yaml(portfolio_yaml: Path) -> None:
     voo, smh = state.positions
     assert (voo.ticker, voo.shares, voo.cost_basis) == ("VOO", Decimal("0.3500"), Decimal("152.10"))
     assert voo.value == (Decimal("0.35") * PRICES["VOO"]).quantize(Decimal("0.01"))
-    assert voo.sleeve == "core"  # inferred from operator.yaml seed membership
+    assert voo.sleeve == "core"  # explicit; inference was removed (Task 1a)
     assert smh.sleeve == "satellite_ai_semis"
     assert state.total_value == voo.value + smh.value + Decimal("57.00")
 
 
-def test_manual_state_explicit_sleeve_and_unknown_ticker(tmp_path: Path) -> None:
+def test_off_seed_ticker_is_accepted_in_any_declared_sleeve(tmp_path: Path) -> None:
+    """§2.0's open universe is preserved: validation checks the SLEEVE NAME against
+    operator.yaml, never the TICKER against seed_examples. ZZZT appears in no seed
+    list and still loads, because seed_examples are starting points, not a whitelist.
+
+    This replaces an assertion that an unknown ticker resolved to "unassigned" and
+    was "not rejected". That conflated two things: an off-seed ticker (fine) with a
+    holding carrying no sleeve (not fine — it is what silently dropped five of the
+    operator's twelve holdings out of the band math)."""
     p = tmp_path / "portfolio.yaml"
     p.write_text(
         "holdings:\n"
         "  - {ticker: ANET, shares: 1, cost_basis: 97.31, sleeve: satellite_ai_semis}\n"
-        "  - {ticker: ZZZT, shares: 2, cost_basis: 20.00}\n"
+        "  - {ticker: ZZZT, shares: 2, cost_basis: 20.00, sleeve: speculative}\n"
         "settled_cash: 10\n"
     )
     state = load_manual_state({"ANET": Decimal("100")}, TODAY, p)
-    assert state.positions[0].sleeve == "satellite_ai_semis"  # explicit override wins
-    assert state.positions[1].sleeve == "unassigned"  # unknown, open universe — not rejected
+    assert state.positions[0].sleeve == "satellite_ai_semis"
+    assert state.positions[1].sleeve == "speculative"
     assert state.positions[1].value == 0  # no price this cycle → valued at 0, flagged upstream
+
+
+def test_holding_without_a_sleeve_is_rejected_not_defaulted(tmp_path: Path) -> None:
+    p = tmp_path / "portfolio.yaml"
+    p.write_text(
+        "holdings:\n  - {ticker: ZZZT, shares: 2, cost_basis: 20.00}\nsettled_cash: 10\n"
+    )
+    with pytest.raises(PortfolioConfigError, match="sleeve"):
+        load_manual_state({"ZZZT": Decimal("10")}, TODAY, p)
 
 
 def test_manual_state_missing_file_points_to_example(tmp_path: Path) -> None:

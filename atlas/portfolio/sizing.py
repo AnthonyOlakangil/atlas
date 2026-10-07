@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import ROUND_DOWN, Decimal
 
+from atlas.core.format import money
 from atlas.core.models import OrderType
 from atlas.core.settings import OperatorConfig
 from atlas.portfolio.state import PortfolioState
@@ -93,7 +94,7 @@ def size_buy(
             clamped = max_position - held
             reasons.append(
                 f"clamped by single-position cap {cfg.risk.max_single_position_pct:.0%}: "
-                f"{spend} → {clamped}"
+                f"{money(spend)} → {money(clamped)}"
             )
             spend = clamped
 
@@ -132,7 +133,7 @@ def size_buy(
     if spend < MIN_TICKET_USD:
         return _reject(
             ticker, sleeve, settled,
-            [*reasons, f"below ${MIN_TICKET_USD} minimum ticket after caps (got ${spend})"],
+            [*reasons, f"below {money(MIN_TICKET_USD)} minimum ticket after caps (got {money(spend)})"],
         )
 
     # --- settled-cash gate (§2.1): a thesis Atlas can't fund is a WATCH ITEM --
@@ -140,7 +141,7 @@ def size_buy(
         return _reject(
             ticker, sleeve, settled,
             [*reasons,
-             f"settled cash ${settled} cannot fund ${spend} — surfaced as watch item, not ticket"],
+             f"settled cash {money(settled)} cannot fund {money(spend)} — surfaced as watch item, not ticket"],
             watch=True,
         )
 
@@ -161,13 +162,13 @@ def size_buy(
             order_type=OrderType.LIMIT, quantity=quantity, dollar_amount=dollar_amount,
             limit_price=limit_price, is_fractional=False,
             cash_before=settled, cash_after=(settled - dollar_amount).quantize(Decimal("0.01")),
-            reasons=[*reasons, f"whole-share limit buy: {quantity} × limit ${limit_price}"],
+            reasons=[*reasons, f"whole-share limit buy: {quantity} × limit {money(limit_price)}"],
         )
 
     if not fractional_tradable:
         return _reject(
             ticker, sleeve, settled,
-            [*reasons, f"${spend} buys < 1 share and {ticker} is not fractional-tradable"],
+            [*reasons, f"{money(spend)} buys < 1 share and {ticker} is not fractional-tradable"],
         )
     quantity = (spend / price).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
     return SizingDecision(

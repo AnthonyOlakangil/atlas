@@ -18,6 +18,11 @@ from typing import Any, Protocol, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from atlas.core.budget import (
+    FREE_TIER_RPD,
+    PACIFIC,
+    record_quota_exhaustion,
+)
 from atlas.core.logging import get_logger, run_dir
 from atlas.core.settings import Settings, get_settings
 
@@ -28,6 +33,35 @@ T = TypeVar("T", bound=BaseModel)
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 FREE_TIER_RPM_CAP = 8  # self-imposed, under the ~10 RPM free-tier ceiling
 MAX_429_RETRIES = 5
+
+# Transient upstream conditions worth another attempt. 503 in particular is what
+# Gemini returns under load ("Spikes in demand are usually temporary") — not
+# retrying it meant one blip killed an agent for a whole cycle and the brief
+# shipped on partial research. 4xx other than 429 will never succeed on retry.
+RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+
+
+def _daily_quota_violation(resp: httpx.Response) -> str | None:
+    """Return the daily allowance if this 429 is a per-DAY quota, else None.
+
+    Google distinguishes the two in `QuotaFailure.violations[].quotaId`:
+    `GenerateRequestsPerDayPerProjectPerModel-FreeTier` vs the per-minute form.
+    They need opposite handling — a per-minute quota clears in under a minute,
+    a per-day one does not clear until midnight Pacific. An unparseable body is
+    treated as transient, because assuming exhaustion would fail a whole cycle
+    on a malformed error.
+    """
+    try:
+        violations = resp.json()["error"]["details"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    for detail in violations:
+        if not isinstance(detail, dict):
+            continue
+        for violation in detail.get("violations", []):
+            if "PerDay" in str(violation.get("quotaId", "")):
+                return str(violation.get("quotaValue", "unknown"))
+    return None
 
 
 class LLMError(RuntimeError):
@@ -145,11 +179,33 @@ class GeminiClient:
                 raise LLMUnavailable(f"network error calling Gemini: {exc}") from exc
             if resp.status_code == 200:
                 return dict(resp.json())
-            if resp.status_code == 429 and attempt < MAX_429_RETRIES:
+            if resp.status_code == 429:
+                daily = _daily_quota_violation(resp)
+                if daily is not None:
+                    # Ground truth beats the local counter: usage.json logs only
+                    # successful calls, so it under-reports after any failure.
+                    # Record the reconciliation so preflight refuses the next
+                    # cycle instead of starting one that cannot finish.
+                    try:
+                        record_quota_exhaustion(
+                            self._usage_file(),
+                            now=datetime.now(PACIFIC),
+                            limit=int(daily) if daily.isdigit() else FREE_TIER_RPD,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - never mask the 429
+                        log.warning(f"could not reconcile quota state: {exc}")
+                    # A per-day quota does not replenish inside a backoff window.
+                    # Retrying it burned 277s across 28 sleeps and still failed.
+                    raise LLMUnavailable(
+                        f"daily free-tier quota exhausted ({daily} requests/day for "
+                        f"{self._model}) — resets midnight Pacific. Not retried: a "
+                        "per-day quota cannot recover within a cycle. See RUNBOOK §1."
+                    )
+            if resp.status_code in RETRYABLE_STATUS and attempt < MAX_429_RETRIES:
                 # exponential backoff + jitter — NEVER an immediate retry (§3.1)
                 delay = min(2**attempt, 30) + random.uniform(0, 1.5)
                 log.warning(
-                    "gemini 429 — backing off",
+                    f"gemini {resp.status_code} — backing off",
                     extra={"data": {"attempt": attempt, "delay_s": round(delay, 1)}},
                 )
                 self._sleep(delay)
@@ -158,6 +214,11 @@ class GeminiClient:
                 raise LLMUnavailable(
                     "persistent 429 from Gemini — free-tier quota likely exhausted "
                     "(resets midnight Pacific; see RUNBOOK §1)"
+                )
+            if resp.status_code in RETRYABLE_STATUS:
+                raise LLMUnavailable(
+                    f"persistent {resp.status_code} from Gemini after "
+                    f"{MAX_429_RETRIES} attempts — upstream outage, not a quota problem"
                 )
             raise LLMError(f"Gemini HTTP {resp.status_code}: {resp.text[:300]}")
         raise LLMUnavailable("unreachable")  # pragma: no cover

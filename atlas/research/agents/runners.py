@@ -48,7 +48,32 @@ def _degraded(agent: str, exc: Exception) -> AnalystView:
     )
 
 
+def _skipped(agent: str, source: str) -> AnalystView:
+    """An agent with no input does not spend a request (Lever 1).
+
+    The free tier allows 20 requests/day and a cycle costs 7, so a request spent
+    reasoning about an empty payload is 5% of the daily budget for nothing. The
+    sentiment analyst did exactly this every cycle, emitting "[SPECULATION] Crowd
+    lean unknown" — which reads as a finding.
+
+    **Absence of data is not absence of signal.** A skip says so plainly and
+    never speculates. The gate reopens on its own the moment a source is
+    configured; nothing here needs editing.
+    """
+    reason = f"not collected — {source}"
+    log.info(f"{agent} skipped: {reason} (no request spent)")
+    return AnalystView(
+        agent=agent,
+        summary=f"{agent}: {reason}.",
+        key_findings=[],
+        confidence=0.0,
+        anomalies=[f"{agent}: skipped — {reason}; no request spent against the daily quota"],
+    )
+
+
 def run_market_agent(snapshot: MarketSnapshot, llm: LLMClient) -> AnalystView:
+    if not snapshot.quotes:
+        return _skipped("market-data", "no quotes returned this cycle")
     payload = snapshot.model_dump_json()[:20000]
     messages = [
         {"role": "system", "content": _STYLE},
@@ -72,6 +97,8 @@ def run_market_agent(snapshot: MarketSnapshot, llm: LLMClient) -> AnalystView:
 
 
 def run_news_agent(digest: NewsDigest, llm: LLMClient) -> AnalystView:
+    if not digest.items:
+        return _skipped("news-analyst", "no articles returned by any configured feed")
     items = [
         {
             "title": i.title, "source": i.source, "tier": i.trust_tier,
@@ -108,6 +135,8 @@ def run_news_agent(digest: NewsDigest, llm: LLMClient) -> AnalystView:
 
 
 def run_sentiment_agent(report: SentimentReport, llm: LLMClient) -> AnalystView:
+    if report.posts_analyzed <= 0:
+        return _skipped("sentiment-analyst", "no source configured")
     messages = [
         {"role": "system", "content": f"{_STYLE}\n\n{ANALYSIS_PREAMBLE}"},
         {
@@ -141,6 +170,8 @@ def run_sentiment_agent(report: SentimentReport, llm: LLMClient) -> AnalystView:
 
 
 def run_macro_agent(ctx: MacroContext, llm: LLMClient) -> AnalystView:
+    if not ctx.series and not ctx.upcoming_events:
+        return _skipped("macro-analyst", "no FRED series or calendar events available")
     series = {
         k: {"value": s.value, "as_of": s.as_of, "source": s.source_url}
         for k, s in ctx.series.items()

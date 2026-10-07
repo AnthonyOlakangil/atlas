@@ -143,7 +143,7 @@ Read this before implementing anything that touches instrument selection. It gov
 
 This governs the same components as 2.0 and is equally binding. Atlas does not evaluate a candidate trade on its standalone merits; it evaluates what that trade does **to the portfolio the operator already holds.**
 
-- **Read current holdings first, every cycle.** Before proposing anything, `portfolio-risk` pulls live positions, cost basis, sleeve weights, and cash from the MCP. Every proposal is reasoned against that actual state — not a blank slate, not yesterday's snapshot.
+- **Read current holdings first, every cycle.** Before proposing anything, `portfolio-risk` pulls live positions, cost basis, sleeve weights, and cash — from the MCP in `connected` mode, or from `config/portfolio.yaml` in `manual` mode (see §5.0). Every proposal is reasoned against that actual state — not a blank slate, not yesterday's snapshot.
 - **Diversification is an objective, not just a cap.** The risk caps (single-position, sector-concentration) are the hard floor. But Atlas actively *prefers* trades that improve the book's balance and *penalizes* ones that pile into what's already heavy. Adding more semis when the AI/semi sleeve is already at the top of its band is disfavored even if the name looks great in isolation — say so in the brief.
 - **Correlation, not just labels.** Two different tickers can be the same bet (e.g. SMH and NVDA overlap heavily; gold miners and spot gold move together). Atlas considers *effective* exposure and correlation, so it doesn't create hidden concentration that the sleeve labels hide.
 - **Marginal contribution framing.** For each candidate, the brief states what it does to the whole: "this moves the AI/semi sleeve from 21% → 24% (still in band), adds correlation to existing NVDA, and reduces cash to $X." The operator should see the portfolio-level consequence, not just the trade.
@@ -216,6 +216,7 @@ atlas/
 ├── atlas/
 │   ├── config/
 │   │   ├── operator.yaml
+│   │   ├── portfolio.yaml      # manual-mode holdings source of truth (see §5.0); gitignored — it's real personal data
 │   │   └── sources.yaml        # feed registry — see Section 7
 │   ├── core/
 │   │   ├── models.py           # SQLAlchemy: Position, Ticket, Brief, Document, Score, Snapshot
@@ -234,7 +235,7 @@ atlas/
 │   │   ├── synthesis.py        # brief generation
 │   │   └── critic.py           # red-team pass
 │   ├── portfolio/
-│   │   ├── state.py            # positions, settled/unsettled cash, GFV counter
+│   │   ├── state.py            # positions, settled/unsettled cash, GFV counter — sourced from MCP or portfolio.yaml per BROKER_MODE
 │   │   ├── sizing.py           # position sizing against operator.yaml
 │   │   ├── drift.py            # allocation drift vs. targets
 │   │   └── scoring.py          # track record: +1d/+5d/+20d vs SPY
@@ -265,7 +266,7 @@ atlas/
 Keep the working tree clean and deliberately organized at all times. The operator intends to push this to GitHub, so treat every file's location as a decision, not an afterthought.
 
 - **Everything in its declared place.** Match the structure above exactly. No stray files at the repo root, no code dumped outside its package, no "temp" or "test2" files left lying around. If a file doesn't have an obvious home, that's a signal the structure needs a considered addition — add it deliberately and note it in `DECISIONS.md`, don't scatter.
-- **A correct `.gitignore` from Phase 0**, before the first commit. It must exclude at minimum: `.env` and any secrets, `__pycache__/`, `*.pyc`, `.venv/`/virtualenvs, `node_modules/`, `dist/`/build output, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.DS_Store`, IDE folders (`.vscode/`, `.idea/`) unless intentionally shared, local SQLite DB files, and the `runs/` debug-log directory. Check in `.env.example`, never `.env`.
+- **A correct `.gitignore` from Phase 0**, before the first commit. It must exclude at minimum: `.env` and any secrets, **`config/portfolio.yaml` (real holdings — never commit)**, `__pycache__/`, `*.pyc`, `.venv/`/virtualenvs, `node_modules/`, `dist/`/build output, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.DS_Store`, IDE folders (`.vscode/`, `.idea/`) unless intentionally shared, local SQLite DB files, and the `runs/` debug-log directory. Check in `.env.example` and a `portfolio.example.yaml`, never the real ones.
 - **Decide what's tracked vs. generated.** `briefs/` is git-tracked (it's the operator's record). Runtime artifacts — logs, caches, the paper-book DB, `runs/<date>/` dumps, cost logs — are generated and gitignored, not committed. Document this split in the README.
 - **No secrets, ever, in the tree or in git history.** Credentials live only in `.env`. If a secret is ever committed by accident, stop and flag it — a public push of a leaked key is a real incident.
 - **One concern per file, sensible names.** Lowercase snake_case for Python modules, matching the tree. No 500-line grab-bag modules; split by responsibility. Group related code into the packages shown, don't flatten everything into `atlas/`.
@@ -274,6 +275,31 @@ Keep the working tree clean and deliberately organized at all times. The operato
 - **Frontend organized too.** Inside `frontend/`, keep a conventional Vite layout — `src/components/`, `src/views/`, `src/lib/`, `src/hooks/` — not a pile of `.tsx` files in one folder.
 
 The test at the end of Phase 0 includes a quick structure check: no unexpected files at root, `.gitignore` present and covering the list above, `.env` absent from tracking.
+
+### 5.0 BROKER_MODE — the Robinhood connection is optional
+
+Atlas supports two broker modes, set by `BROKER_MODE` in settings. **`manual` is the default.** The operator can run the entire research-and-brief product with **no Robinhood connection at all**, and add the connection later without a rewrite.
+
+- **`manual` (default):** No MCP connection, no OAuth, no account access. Market data comes from `yfinance` and the web scrapers instead of the MCP. Portfolio state is read from a hand-maintained **`config/portfolio.yaml`** (schema below) that the operator updates when they trade. Atlas produces briefs and proposed tickets exactly as normal, but there is **no execution and no live portfolio sync** — the ticket view tells the operator to place the orders themselves in the Robinhood app. Nothing of the operator's is exposed.
+- **`connected`:** The MCP is wired in for live portfolio sync and (after paper-mode graduation) execution. Everything in the rest of §5 applies. This is opt-in, reached by setting `BROKER_MODE=connected` and completing OAuth.
+
+**`config/portfolio.yaml`** (source of truth in `manual` mode — operator maintains it by hand):
+```yaml
+# Update this whenever you trade. Atlas reads it instead of calling the MCP.
+holdings:
+  - {ticker: VOO, shares: 0.3500, cost_basis: 152.10}
+  - {ticker: SMH, shares: 0.2000, cost_basis: 84.00}
+settled_cash: 45.00
+unsettled_cash: 0.00      # proceeds from sales not yet settled (T+1)
+```
+
+Implementation notes:
+- The portfolio-state layer (Phase 3) reads from **either** the MCP (`connected`) **or** `portfolio.yaml` (`manual`) behind one interface — the sizing, drift, and portfolio-aware logic don't care which. Same settled/unsettled-cash and GFV tracking applies to the manual numbers.
+- In `manual` mode the execution package (Phase 7) is inert: `atlas execute` reports that the broker is not connected and points the operator to the ticket's manual instructions. `place_equity_order` remains unreachable, as always.
+- The dashboard's Ticket Review view, in `manual` mode, renders each ticket with a **"place this yourself in Robinhood"** panel (the app-path how-to) instead of an approve-to-execute control.
+- Switching `manual → connected` later is a config change plus OAuth, not a code change. The provider abstraction already isolates this.
+
+---
 
 Do not spend cycles rediscovering this. Connect via `https://agent.robinhood.com/mcp/trading`. The operator completes OAuth in a browser; the Agentic account is a separate account from their primary brokerage.
 
@@ -308,12 +334,12 @@ Use them during the build (parallel implementation) and encode their logic as pr
 
 | Subagent | Responsibility | Tool allowlist |
 |---|---|---|
-| `market-data` | Prices, OHLCV, technicals (RSI/MACD/BB/MA), fundamentals, earnings calendar, index levels. Produces `MarketSnapshot`. | RH MCP read tools, yfinance, Read/Write |
+| `market-data` | Prices, OHLCV, technicals (RSI/MACD/BB/MA), fundamentals, earnings calendar, index levels. Produces `MarketSnapshot`. **Uses yfinance as the baseline source so it works with no broker link; enriches from the MCP only in `connected` mode.** | yfinance, RH MCP read (connected mode), Read/Write |
 | `news-analyst` | Official sources, financial-data providers, and news: Yahoo Finance, Reuters, AP, CNBC, WSJ/NYT/CNN/Fox, plus company IR/filings and professional channels (LinkedIn company posts, trade press). See 7.0 — this is the **primary factual basis**. Discover and add reputable sector sources independently; examples are not the boundary. See 7.2 for the political-balance rule. Extracts events, earnings, corporate actions, guidance. Produces `NewsDigest` with per-item source + timestamp. | WebFetch, WebSearch, Read/Write |
 | `sentiment-analyst` | **Sentiment/crowd-positioning ONLY, never factual basis (see 7.0).** Reddit (r/investing, r/stocks, r/SecurityAnalysis, r/wallstreetbets — tier the last as noise), YouTube transcripts, StockTwits, other social. Examples are illustrative; may consult more social/video, always sentiment-only. **Highest injection risk — hardest quarantine.** Produces `SentimentReport` with explicit low-confidence framing. | WebFetch, Read/Write. NO Bash. NO execution. |
 | `macro-analyst` | Fed funds, dot plot, FOMC calendar, CPI/PCE prints, 10Y yield, dollar, oil, geopolitics. Produces `MacroContext`. | WebFetch, WebSearch, Read/Write |
 | `sector-analyst` | Deep vertical on the AI/semi theme plus the operator's other sleeves. **Actively hunts the best instruments per sleeve across the open universe (see 2.0), not only the seed tickers.** Tracks internal rotation (the NVDA-lagging / MU-INTC-leading dynamic is exactly the kind of divergence to surface) and surfaces better-fit names/ETFs the operator hasn't considered. Produces `SectorView`. | WebFetch, WebSearch, RH MCP read, Read/Write |
-| `portfolio-risk` | Current positions, allocation drift vs. `operator.yaml` **sleeve bands** (not the ticker list — see 2.0), concentration, correlation, settled-cash and GFV checks, position sizing. Enforces caps against *whatever instrument research selected*. Produces `RiskAssessment` and is the only agent that can veto a ticket. | RH MCP read, Read/Write, Bash (tests) |
+| `portfolio-risk` | Current positions (from MCP or `portfolio.yaml` per BROKER_MODE — §5.0), allocation drift vs. `operator.yaml` **sleeve bands** (not the ticker list — see 2.0), concentration, correlation, settled-cash and GFV checks, position sizing. Enforces caps against *whatever instrument research selected*. Produces `RiskAssessment` and is the only agent that can veto a ticket. | RH MCP read (connected mode), Read/Write, Bash (tests) |
 | `synthesizer` | Consumes all of the above → the daily brief. Owns tone, structure, teaching content, and the fact/consensus/speculation tagging. **Reasons portfolio-aware (see 2.0.1): every ticket must carry its Portfolio impact — sleeve-weight delta, correlation/overlap, cash delta, diversification effect.** Uses the configured LLM (`gemini-3-flash` by default). | Read/Write |
 | `critic` | **Adversarial.** Red-teams the brief: unsupported claims, missing bear case, stale citations, sizing violations, **missing or hand-wavy Portfolio impact (a ticket evaluated in isolation instead of against the current book — see 2.0.1)**, hindsight bias, thesis contradicting prior briefs without acknowledgment. Has authority to reject and force a re-synthesis. Max 2 rounds. Uses the configured LLM (`gemini-3-flash` by default). | Read/Write, Bash (tests) |
 | `viz-builder` | Chart payloads and React components. | Read/Write, Bash |
@@ -505,6 +531,7 @@ Do not ask about these. Pick the default, note it in `DECISIONS.md`, move on.
 | Question | Default |
 |---|---|
 | Which LLM? | Google Gemini free tier, `gemini-3-flash`, for all passes (analysis, synthesis, critic). Provider-agnostic client (§3.1) so Ollama/Anthropic swap behind one config flag. |
+| Broker connection? | `BROKER_MODE=manual` by default (§5.0): no Robinhood link, holdings from `config/portfolio.yaml`, market data via yfinance, briefs + proposed tickets only, operator places orders manually. `connected` (MCP live sync + execution) is opt-in later, no rewrite. |
 | Gemini API key? | **Ask the operator to paste it into `.env` as `GEMINI_API_KEY` when first needed — never into chat, never hardcoded, never a placeholder treated as real.** Pause and wait for confirmation. Ship `.env.example` with an empty key and a link to aistudio.google.com. |
 | DB? | SQLite. Postgres path documented, not built. |
 | Auth on the dashboard? | None — binds to `127.0.0.1` only. Documented in RUNBOOK. |

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from atlas.core.format import money
+
 
 def robinhood_howto(
     *,
@@ -29,7 +31,7 @@ def robinhood_howto(
             )
         return base + (
             "Tap the order-type selector (top-right) → **Stop Limit Order** → set stop "
-            f"${limit_price} / limit a few cents below → **Shares**: {quantity} → Review → Submit."
+            f"{money(limit_price)} / limit a few cents below → **Shares**: {quantity} → Review → Submit."
         )
     base = (
         f'Open Robinhood → Search "{ticker}" → check the detail page (price vs 52-wk '
@@ -37,12 +39,13 @@ def robinhood_howto(
     )
     if is_fractional:
         return base + (
-            f"Robinhood switches to **Buy in Dollars** for ${float(dollar_amount):.2f} — this is a "
+            f"Robinhood switches to **Buy in Dollars** for {money(dollar_amount)} — this is a "
             "**market** order with **no price field**, because fractional shares are "
             "market-only on Robinhood. You get the next market price; there is no price cap."
         )
     return base + (
-        f"Tap the order-type selector → **Limit Order** → limit price ${limit_price} → "
-        f"**Shares**: {quantity} → good-for-day → Review → Submit. The order only fills at "
-        f"${limit_price} or better."
+        f"Tap the order-type selector → **Limit Order** → limit price {money(limit_price)} → "
+        f"**Shares**: {quantity} → good-for-day → Review → Submit. The order will not fill "
+        f"above {money(limit_price)}. When that limit sits at or just through the current "
+        "ask it fills immediately — the cap limits slippage, it does not get you a better price."
     )

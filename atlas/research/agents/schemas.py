@@ -73,6 +73,12 @@ class RiskAssessment(BaseModel):
     vetoed: list[Veto] = Field(default_factory=list)
     watch_items: list[str] = Field(default_factory=list)
     drift_notes: list[str] = Field(default_factory=list)
+    # Structural ticket rejections (Bug 3) — surfaced in §9 Anomalies so a
+    # dropped ticket is always visible with the rule that caught it.
+    anomalies: list[str] = Field(default_factory=list)
+    # Task B: sleeves outside band that no proposed trade remediates.
+    unaddressed_breaches: list[str] = Field(default_factory=list)
+    breach_explanation: str = ""
     gfv_status: str = ""
     settled_cash: float = 0.0
     unsettled_cash: float = 0.0

@@ -16,7 +16,7 @@ jobs:
       - name: Install
         run: uv sync --all-groups
       - name: Lint
-        run: uv run ruff check atlas tests
+        run: uv run ruff check .
       - name: Typecheck (strict on execution)
         run: uv run mypy atlas/execution --strict
       - name: Tests (includes architecture rules)
@@ -32,6 +32,9 @@ jobs:
       - name: Install
         working-directory: frontend
         run: '[ -f package.json ] && npm ci || echo "frontend not scaffolded yet"'
+      - name: Lint
+        working-directory: frontend
+        run: '[ -f package.json ] && npm run lint || echo "frontend not scaffolded yet"'
       - name: Test
         working-directory: frontend
         run: '[ -f package.json ] && npm test -- --run || echo "frontend not scaffolded yet"'

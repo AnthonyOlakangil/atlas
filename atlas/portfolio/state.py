@@ -18,7 +18,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from atlas.core.models import CashEvent, PaperOrder, Position, TradeAction
-from atlas.core.settings import CONFIG_DIR, get_operator_config, get_settings
+from atlas.core.settings import (
+    CONFIG_DIR,
+    OperatorConfig,
+    get_operator_config,
+    get_settings,
+)
 
 GFV_RESTRICTION_THRESHOLD = 3  # three GFVs in 12 months → 90-day restriction
 
@@ -219,7 +224,11 @@ class PortfolioConfigError(RuntimeError):
 
 
 def load_manual_state(
-    prices: dict[str, Decimal], as_of: date, path: Path | None = None
+    prices: dict[str, Decimal],
+    as_of: date,
+    path: Path | None = None,
+    *,
+    cfg: OperatorConfig | None = None,
 ) -> PortfolioState:
     """BROKER_MODE=manual: holdings and cash come from a hand-maintained yaml.
 
@@ -239,13 +248,31 @@ def load_manual_state(
     except yaml.YAMLError as exc:
         raise PortfolioConfigError(f"{path} is not valid YAML: {exc}") from exc
 
-    cfg = get_operator_config()
+    cfg = cfg or get_operator_config()
+    declared = cfg.declared_sleeves()
 
-    def infer_sleeve(ticker: str) -> str:
-        for name, sleeve in cfg.sleeves.items():
-            if ticker in sleeve.seed_examples:
-                return name
-        return "unassigned"
+    def resolve_sleeve(ticker: str, raw_sleeve: object, index: int) -> str:
+        """Strict: an unresolvable sleeve fails the load, it never defaults.
+
+        The old behaviour fell back to seed-example inference and then to the
+        literal "unassigned", which sizing.py rejected as an unknown sleeve —
+        so the holding silently disappeared from every band calculation.
+        """
+        name = str(raw_sleeve).strip() if raw_sleeve is not None else ""
+        if not name:
+            raise PortfolioConfigError(
+                f"{path} holdings[{index}] ({ticker}): no sleeve. Every holding needs an "
+                f"explicit `sleeve:` — valid values are {sorted(declared)}. Atlas will not "
+                "guess, because a mislabelled holding drops out of the band math silently."
+            )
+        if name not in declared:
+            raise PortfolioConfigError(
+                f"{path} holdings[{index}] ({ticker}): sleeve {name!r} is not declared in "
+                f"operator.yaml. Valid sleeves are {sorted(declared)}. A sleeve declared "
+                "without a `target_pct` band is intentionally not valid — it cannot be "
+                "drift-checked."
+            )
+        return name
 
     positions: list[PositionView] = []
     for i, h in enumerate(raw.get("holdings") or []):
@@ -263,7 +290,7 @@ def load_manual_state(
         positions.append(
             PositionView(
                 ticker=ticker,
-                sleeve=str(h.get("sleeve") or infer_sleeve(ticker)),
+                sleeve=resolve_sleeve(ticker, h.get("sleeve"), i),
                 shares=shares,
                 cost_basis=cost_basis,
                 price=price,
@@ -283,6 +310,43 @@ def load_manual_state(
 
     ledger = Ledger(cash=cash, gfv_events=[], open_lots=[])
     return PortfolioState(as_of=as_of, positions=positions, cash=cash, ledger=ledger)
+
+
+# Allow a cent of rounding drift across a book of quantized position values.
+_RECONCILE_TOLERANCE = Decimal("0.0001")
+
+
+def validate_allocation(state: PortfolioState, cfg: OperatorConfig) -> None:
+    """Backstop: declared-sleeve weights plus cash must reconcile to 100%.
+
+    Whatever the cause — a bad sleeve name, a dropped holding, a future refactor
+    — if the declared sleeves plus cash do not account for the whole book, then
+    something is invisible to the band math and no brief may render off it.
+    Sleeve bands are percentages of the *total* book (they sum to 80–105%), so
+    cash is the residual and belongs in this sum.
+    """
+    total = state.total_value
+    if total == 0:
+        return
+
+    declared = cfg.declared_sleeves()
+    stray = sorted({p.sleeve for p in state.positions} - declared)
+    if stray:
+        raise PortfolioConfigError(
+            f"positions sit in undeclared sleeve(s) {stray} — they would drop out of "
+            f"the band math. Valid sleeves: {sorted(declared)}"
+        )
+
+    weights = state.sleeve_weights()
+    accounted = sum((w for name, w in weights.items() if name in declared), Decimal(0))
+    accounted += state.cash.total / total
+    if abs(accounted - 1) > _RECONCILE_TOLERANCE:
+        missing = (1 - accounted) * 100
+        raise PortfolioConfigError(
+            f"allocation does not reconcile: declared sleeves plus cash account for "
+            f"{accounted * 100:.4f}% of the book, leaving {missing:.4f}% unaccounted. "
+            "A holding has fallen out of the band math."
+        )
 
 
 def load_portfolio_state(

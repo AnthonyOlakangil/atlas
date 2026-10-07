@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import BriefReader, { annotate } from "../views/BriefReader";
+import { annotate } from "../lib/annotate";
+import BriefReader from "../views/BriefReader";
 import MarketPulse from "../views/MarketPulse";
 import Positions from "../views/Positions";
 import TicketReview from "../views/TicketReview";

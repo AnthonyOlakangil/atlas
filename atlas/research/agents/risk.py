@@ -11,11 +11,18 @@ from __future__ import annotations
 import copy
 from decimal import ROUND_DOWN, Decimal
 
+from atlas.core.format import money
 from atlas.core.logging import get_logger
 from atlas.core.settings import OperatorConfig
 from atlas.portfolio.drift import BandStatus, compute_drift
 from atlas.portfolio.sizing import SECTOR_MAP, size_buy
 from atlas.portfolio.state import PortfolioState, PositionView
+from atlas.portfolio.validate import TicketDraft, validate_ticket
+from atlas.research.agents.bands import (
+    breach_anomalies,
+    breach_explanation,
+    find_unaddressed_breaches,
+)
 from atlas.research.agents.schemas import (
     ApprovedIdea,
     ResearchBundle,
@@ -96,12 +103,12 @@ def _portfolio_impact(
         # T+1, so settled cash is unchanged today — it moves to unsettled (§2.1).
         proceeds = -spend
         cash_note = (
-            f"settled cash ${state.cash.settled} unchanged (${proceeds} proceeds "
+            f"settled cash {money(state.cash.settled)} unchanged ({money(proceeds)} proceeds "
             "settle T+1, then spendable)"
         )
     else:
         cash_after = state.cash.settled - spend
-        cash_note = f"settled cash ${state.cash.settled} → ${cash_after}"
+        cash_note = f"settled cash {money(state.cash.settled)} → {money(cash_after)}"
     return (
         f"{idea.sleeve} sleeve {float(sleeve_before):.1%} → {float(sleeve_after):.1%} "
         f"({'in band' if in_band else 'OUT OF BAND'} {band[0]:.0%}–{band[1]:.0%}); "
@@ -127,8 +134,15 @@ def run_risk_agent(
             assessment.drift_notes.append(
                 f"{d.sleeve}: {float(d.actual_pct):.1%} is {d.status.value} band "
                 f"{float(d.band_lo):.0%}–{float(d.band_hi):.0%} "
-                f"(${d.delta_to_band} to re-enter)"
+                f"({money(d.delta_to_band)} to re-enter)"
             )
+
+    # Task B: a band breach nothing addresses is a detected condition. The prompt
+    # asks the sector analyst to remediate; this verifies it actually did.
+    breaches = find_unaddressed_breaches(compute_drift(state, cfg), bundle.sector.trade_ideas)
+    assessment.unaddressed_breaches = [b.sleeve for b in breaches]
+    assessment.anomalies.extend(breach_anomalies(breaches))
+    assessment.breach_explanation = breach_explanation(breaches)
 
     gfv = state.ledger.gfv_count()
     assessment.gfv_status = (
@@ -186,8 +200,8 @@ def run_risk_agent(
                     continue
                 if sell_dollars > max_trim:
                     trim_note = (
-                        f"trim clamped to ${max_trim} so {idea.sleeve} lands at its band floor "
-                        f"{float(band_lo):.0%} (LLM asked ${sell_dollars}, would have overshot below band)"
+                        f"trim clamped to {money(max_trim)} so {idea.sleeve} lands at its band floor "
+                        f"{float(band_lo):.0%} (LLM asked {money(sell_dollars)}, would have overshot below band)"
                     )
                     sell_dollars = max_trim
             # Round shares DOWN: a clamped trim must never cross its floor, and a
@@ -247,6 +261,27 @@ def run_risk_agent(
         if approved_count >= MAX_TICKETS_PER_DAY:
             assessment.watch_items.append(f"{idea.ticker}: over daily ticket cap ({MAX_TICKETS_PER_DAY}) — deferred")
             continue
+        # Structural validation at generation: an unexecutable ticket must never
+        # be built (Bug 3). Rejections are recorded, never silently dropped.
+        check = validate_ticket(
+            TicketDraft(
+                ticker=idea.ticker,
+                action=idea.action,
+                order_type=decision.order_type,
+                quantity=decision.quantity,
+                limit_price=decision.limit_price,
+                market_price=price,
+                dollar_amount=decision.dollar_amount,
+                settled_cash=decision.cash_before,
+                is_fractional=decision.is_fractional,
+            )
+        )
+        if not check.ok:
+            assessment.anomalies.append(f"ticket rejected [{check.rule}] {check.message}")
+            assessment.vetoed.append(
+                Veto(ticker=idea.ticker, reason=f"[{check.rule}] {check.message}")
+            )
+            continue
         assessment.approved.append(
             ApprovedIdea(
                 idea=idea,
@@ -257,7 +292,7 @@ def run_risk_agent(
                 is_fractional=decision.is_fractional,
                 cash_before=float(decision.cash_before),
                 cash_after=float(decision.cash_after),
-                sizing_notes=decision.reasons,
+                sizing_notes=[*decision.reasons, *( [check.disclosure] if check.disclosure else [] )],
                 portfolio_impact=_portfolio_impact(idea, decision.dollar_amount, work, cfg),
             )
         )

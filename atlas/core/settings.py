@@ -45,11 +45,24 @@ class OperatorConfig(BaseModel):
     risk: RiskConfig
     sleeves: dict[str, SleeveConfig]
     universe: str
+    # Candidates to fetch but not hold. Distinct from sleeve seed_examples, which
+    # are illustrative only (§2.0) and must never drive data acquisition.
+    watchlist: list[str] = []
     preferences: list[str]
 
     def risk_decimal(self, name: str) -> Decimal:
         """Risk cap as a Decimal (yaml floats never touch money math directly)."""
         return Decimal(str(getattr(self.risk, name)))
+
+    def declared_sleeves(self) -> frozenset[str]:
+        """The single source of truth for valid sleeve names.
+
+        Callers validate against this rather than a hardcoded literal, so adding
+        a sleeve to operator.yaml is the only edit required. A sleeve declared
+        without a `target_pct` band never reaches `sleeves` (see `load`), so it
+        is correctly absent here too — a sleeve with no band cannot be drift-checked.
+        """
+        return frozenset(self.sleeves)
 
     @classmethod
     def load(cls, path: Path | None = None) -> OperatorConfig:
@@ -66,6 +79,7 @@ class OperatorConfig(BaseModel):
             risk=RiskConfig(**raw["risk"]),
             sleeves=sleeves,
             universe=alloc.get("universe", "open"),
+            watchlist=list(raw.get("watchlist") or []),
             preferences=raw["preferences"],
         )
 

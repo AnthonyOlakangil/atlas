@@ -13,6 +13,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel, Field
 
 from atlas.core.logging import get_logger
+from atlas.ingest.symbols import to_yahoo
 
 log = get_logger("ingest.market")
 
@@ -124,7 +125,9 @@ def compute_indicators(symbol: str, closes: list[float]) -> Indicators:
 def _yf_closes(symbol: str, period: str = "1y") -> list[float]:
     import yfinance as yf
 
-    hist = yf.Ticker(symbol).history(period=period)
+    # Single translation point: every yfinance path (quotes and indicators)
+    # funnels through here, so class shares like BRK.B -> BRK-B are handled once.
+    hist = yf.Ticker(to_yahoo(symbol)).history(period=period)
     return [float(c) for c in hist["Close"].tolist()]
 
 

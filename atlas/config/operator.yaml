@@ -49,6 +49,12 @@ allocation_framework:
     seed_examples: ["IBIT"]
     note: "sized as money that can be fully lost"
 
+# Candidate positions the operator wants priced and researched but does not hold.
+# This is a FETCH INSTRUCTION, unlike the sleeve `seed_examples` above, which are
+# illustrative starting points only (§2.0) and never order data. Holdings enter
+# the universe automatically from portfolio.yaml — never list them here.
+watchlist: ["GOOG", "AMZN", "SGOV", "BITB"]
+
 preferences:
   - "plain-language mechanical explanations with concrete examples"
   - "direct and concise; no filler, no hedging theater"

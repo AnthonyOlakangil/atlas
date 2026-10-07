@@ -110,14 +110,26 @@ def main() -> None:
     """
     import sys
 
+    from atlas.core.budget import BudgetExhaustedError
     from atlas.core.llm import LLMError
     from atlas.execution.approval import ApprovalError
     from atlas.execution.transport import MCPToolError, MCPTransportError
     from atlas.portfolio.state import PortfolioConfigError
+    from atlas.research.orchestrator import HoldingsCoverageError
 
     try:
         app()
-    except (LLMError, ApprovalError, PortfolioConfigError, MCPTransportError, MCPToolError) as exc:
+    except (
+        LLMError,
+        ApprovalError,
+        PortfolioConfigError,
+        MCPTransportError,
+        MCPToolError,
+        # A refused cycle is an operational outcome, not a crash: one clear line
+        # and a non-zero exit, never a silent no-op and never a traceback.
+        BudgetExhaustedError,
+        HoldingsCoverageError,
+    ) as exc:
         typer.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 

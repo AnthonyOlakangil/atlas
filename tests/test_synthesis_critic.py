@@ -189,7 +189,7 @@ def test_rejection_feeds_back_and_retries_once(
         calls.append(1)
         if len(calls) == 1:
             return CriticReport(defects=[Defect("seeded", "first draft rejected")])
-        return CriticReport()
+        return CriticReport(adversarially_reviewed=True)
 
     monkeypatch.setattr(synthesis, "critique_brief", flaky_critic)
     brief = _synthesize(db_session)
@@ -234,7 +234,13 @@ def test_snapshot_written_per_brief(db_session: Session) -> None:
     assert snaps[0].spy_close == Decimal("748.30")
 
 
-def test_day_change_computed_from_prior_snapshot(db_session: Session) -> None:
+def test_day_change_never_derives_a_return_from_totals_alone(db_session: Session) -> None:
+    """Bug 1 (P0). This test previously asserted "+4.17% since last snapshot",
+    computed as (250-240)/240 straight off `total_value` — the same total-vs-total
+    mechanism that printed "+94.86%" on 2026-08-16 after portfolio.yaml was
+    replaced. `total_value` includes cash, so that figure counted a deposit as
+    return. The prior snapshot here carries no per-position prices, so the only
+    honest output is a named degradation, not a number."""
     db_session.add(
         Snapshot(
             taken_at=datetime(2026, 7, 16, 20, 0, tzinfo=UTC),
@@ -244,4 +250,5 @@ def test_day_change_computed_from_prior_snapshot(db_session: Session) -> None:
     )
     db_session.flush()
     brief = _synthesize(db_session)
-    assert "+4.17% since last snapshot" in brief.content_md
+    assert "Day change**: n/a" in brief.content_md
+    assert "+4.17%" not in brief.content_md

@@ -56,6 +56,9 @@ class Defect:
 @dataclass
 class CriticReport:
     defects: list[Defect] = field(default_factory=list)
+    # Whether the adversarial LLM layer actually ran. A structural-only pass is
+    # NOT a pass (Task C) — it must never be reported as one.
+    adversarially_reviewed: bool = False
 
     @property
     def blocking(self) -> list[Defect]:
@@ -66,6 +69,8 @@ class CriticReport:
         return not self.blocking
 
     def summary(self) -> str:
+        if self.passes and not self.adversarially_reviewed:
+            return "critic: STRUCTURAL CHECKS ONLY — NOT ADVERSARIALLY REVIEWED"
         if self.passes:
             return "critic: PASS"
         return "critic: REJECT — " + "; ".join(f"[{d.code}] {d.detail}" for d in self.blocking)
@@ -195,6 +200,12 @@ def critique_brief(
 ) -> CriticReport:
     report = CriticReport(defects=structural_review(brief_md, assessment))
     if llm is not None:
-        report.defects.extend(llm_review(brief_md, bundle, llm))
+        llm_defects = llm_review(brief_md, bundle, llm)
+        report.defects.extend(llm_defects)
+        # The layer ran only if it did not fall back. `critic_degraded` is the
+        # sentinel llm_review returns when the call failed.
+        report.adversarially_reviewed = not any(
+            d.code == "critic_degraded" for d in llm_defects
+        )
     log.info(report.summary())
     return report

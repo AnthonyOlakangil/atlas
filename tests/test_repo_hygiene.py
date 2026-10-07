@@ -17,6 +17,7 @@ EXPECTED_ROOT = {
     ".python-version",
     ".venv",
     "BUILD_PROMPT.md",
+    "BUILD_PROMPT_V2.md",
     "DECISIONS.md",
     "DOGFOOD.md",
     "KNOWN_ISSUES.md",

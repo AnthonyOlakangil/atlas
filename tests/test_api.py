@@ -94,21 +94,30 @@ def test_market_pulse_marks_stale(client: TestClient) -> None:
 
 
 def test_performance_and_track_record(client: TestClient, db_session: Session) -> None:
-    for i, (val, spy) in enumerate([(250, 748), (255, 750), (252, 749)]):
+    """Task 1b: this previously asserted atlas == 2.0 from total_value 250 -> 255
+    on snapshots carrying no positions at all. That is the total-vs-total
+    mechanism — `total_value` includes the $10 cash, so the figure blended a cash
+    balance into a return. Snapshots now carry real positions and the series is a
+    chained per-position price return: +2%, then -0.98%, compounding to +1%."""
+    prices = ["100.00", "102.00", "101.00"]
+    for i, (px, spy) in enumerate(zip(prices, [748, 750, 749], strict=True)):
         db_session.add(
             Snapshot(
                 taken_at=datetime(2026, 7, 14 + i, 20, 0, tzinfo=UTC),
-                total_value=Decimal(val), settled_cash=Decimal("10"), unsettled_cash=Decimal(0),
+                total_value=Decimal(px) + Decimal("10"),
+                settled_cash=Decimal("10"), unsettled_cash=Decimal(0),
                 spy_close=Decimal(spy),
+                positions={"VOO": {"shares": "1.0", "price": px, "value": px}},
             )
         )
     db_session.flush()
     perf = client.get("/api/performance", params={"window": "ALL"}).json()
     assert len(perf["series"]) == 3
     assert perf["series"][0]["atlas"] == 0.0
-    assert perf["series"][1]["atlas"] == 2.0  # 250→255
+    assert perf["series"][1]["atlas"] == 2.0  # 100 -> 102
+    assert perf["series"][2]["atlas"] == 1.0  # 1.02 * (101/102) - 1
 
     track = client.get("/api/track-record").json()
     assert track["stats"]["paper_days_logged"] == 3
     assert len(track["drawdown"]) == 3
-    assert track["drawdown"][2]["drawdown"] < 0  # 255→252 is a drawdown, shown honestly
+    assert track["drawdown"][2]["drawdown"] < 0  # 102 -> 101 is a real drawdown

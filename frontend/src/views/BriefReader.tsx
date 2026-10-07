@@ -4,26 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Empty, StatusChip } from "../components/ui";
 import { ApiError, fetchBrief } from "../lib/api";
-
-/** Wrap glossary terms found in plain text with a hover-tooltip span. */
-export function annotate(text: string, glossary: Record<string, string>): ReactNode[] {
-  const terms = Object.keys(glossary).sort((a, b) => b.length - a.length);
-  if (terms.length === 0) return [text];
-  const pattern = new RegExp(
-    `(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`,
-    "gi",
-  );
-  return text.split(pattern).map((part, i) => {
-    const def = glossary[part.toLowerCase()] ?? glossary[part];
-    return def ? (
-      <span key={i} className="glossary-term" title={def} data-testid="glossary-term">
-        {part}
-      </span>
-    ) : (
-      part
-    );
-  });
-}
+import { annotate } from "../lib/annotate";
 
 export default function BriefReader() {
   const { data, isLoading, error } = useQuery({

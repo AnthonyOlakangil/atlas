@@ -39,3 +39,8 @@ frontend/dist/
 runs/
 logs/
 .cache/
+
+# Generated daily briefs contain real holdings and dollar values (same reason as
+# portfolio.yaml). Only the tracked FakeLLM dry run + the reference brief ship.
+briefs/20*.md
+!briefs/2026-07-19.md

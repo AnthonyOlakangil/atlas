@@ -59,7 +59,12 @@ def build_offline_bundle(llm: FakeLLMClient | None = None) -> ResearchBundle:
         snapshot=fixture_snapshot(),
         digest=fixture_digest(),
         sentiment=SentimentReport(posts_analyzed=3, ticker_mentions={"NVDA": 2}, bullish_ratio=0.7),
-        macro=MacroContext(),
+        # Non-empty: an agent with empty input is now gated and never calls the
+        # LLM (Lever 1), so an empty MacroContext would make the parallel-dispatch
+        # assertion below prove the gate rather than the dispatch.
+        macro=MacroContext(
+            upcoming_events=[{"date": "2026-09-16", "event": "FOMC rate decision"}]
+        ),
         cfg=CFG,
         holdings_summary="(no positions yet)",
     )
@@ -77,6 +82,11 @@ def test_offline_bundle_valid_and_deterministic(tmp_path: Path) -> None:
         assert b.sector.trade_ideas, "sector agent must produce ideas"
     d1, d2 = b1.model_dump(exclude={"generated_at"}), b2.model_dump(exclude={"generated_at"})
     assert d1 == d2  # deterministic from fixtures (§Phase 5 gate)
+    # v2 Part 0.3 Test A raises the bar to byte-identical serialization: equal dicts
+    # can still serialize differently (float repr, key ordering, enum coercion).
+    j1 = b1.model_dump_json(exclude={"generated_at"})
+    j2 = b2.model_dump_json(exclude={"generated_at"})
+    assert j1 == j2, "ResearchBundle must serialize byte-identically across identical runs"
     # serializes cleanly for runs/<date>/ debugging
     (tmp_path / "bundle.json").write_text(b1.model_dump_json())
 

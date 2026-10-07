@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -18,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from atlas.core.format import money, pct, shares
 from atlas.core.howto import robinhood_howto
 from atlas.core.llm import LLMClient, LLMError
 from atlas.core.logging import get_logger
@@ -33,10 +35,12 @@ from atlas.core.models import (
 from atlas.core.settings import BRIEFS_DIR, OperatorConfig, get_operator_config
 from atlas.ingest.macro import MacroContext
 from atlas.ingest.market import MarketSnapshot
+from atlas.portfolio.performance import compute_day_change, position_map
 from atlas.portfolio.scoring import track_record_section
-from atlas.portfolio.state import PortfolioState
+from atlas.portfolio.state import PortfolioState, validate_allocation
 from atlas.research.agents.schemas import ApprovedIdea, ResearchBundle, RiskAssessment
 from atlas.research.critic import critique_brief
+from atlas.research.integrity import UNREVIEWED_LABEL, ResearchIntegrity
 
 log = get_logger("research.synthesis")
 
@@ -136,7 +140,7 @@ def _exit_plan(a: ApprovedIdea) -> tuple[Decimal | None, Decimal | None, str]:
         stop = (ref * STOP_PCT).quantize(Decimal("0.01"))
         target = (ref * TARGET_PCT).quantize(Decimal("0.01"))
         return stop, target, (
-            f"Stop ${stop} (-8%), target ${target} (+20%). ⚠️ Stops are app-managed: Atlas "
+            f"Stop {money(stop)} (-8%), target {money(target)} (+20%). ⚠️ Stops are app-managed: Atlas "
             "monitors and proposes the exit — they are only enforced while Atlas is running "
             "(Robinhood has no bracket orders)."
         )
@@ -153,7 +157,7 @@ def _ticket_md(n: int, a: ApprovedIdea) -> str:
         "fractional and Robinhood forbids fractional limit orders, so there is no price cap "
         "on this fill"
         if a.is_fractional
-        else f"{a.quantity} whole share(s) — **{a.order_type} order** at ${a.limit_price}"
+        else f"{a.quantity} whole share(s) — **{a.order_type} order** at {money(a.limit_price)}"
     )
     stop, target, exit_text = _exit_plan(a)
     lines = [
@@ -201,14 +205,20 @@ def _learning_note(a: ApprovedIdea) -> str:
 
 
 def _portfolio_status(state: PortfolioState, cfg: OperatorConfig, session: Session) -> str:
+    # Backstop before anything renders: if declared sleeves plus cash do not
+    # account for the whole book, a holding is invisible to the band math and the
+    # concentration numbers cannot be trusted. Halt rather than publish (Task 1a).
+    validate_allocation(state, cfg)
     total = state.total_value
     prev = session.scalars(
         select(Snapshot).where(Snapshot.mode == Mode.PAPER).order_by(Snapshot.taken_at.desc())
     ).first()
-    day_change = "n/a (first tracked day)"
-    if prev and prev.total_value > 0:
-        pct = (total - prev.total_value) / prev.total_value * 100
-        day_change = f"{pct:+.2f}% since last snapshot ({prev.taken_at.date().isoformat()})"
+    # Per-position price return, never total-vs-total: a total diff cannot tell a
+    # price move from a deposit or a composition change (Bug 1, P0).
+    prior_on = prev.taken_at.date() if prev else None
+    day_change = compute_day_change(
+        prev.positions if prev else None, position_map(state.positions), prior_on
+    ).render(prior_on)
     weights = state.sleeve_weights()
     rows = ["| Sleeve | Actual | Target band | Status |", "|---|---|---|---|"]
     for name, sleeve in cfg.sleeves.items():
@@ -217,17 +227,19 @@ def _portfolio_status(state: PortfolioState, cfg: OperatorConfig, session: Sessi
         status = "in band" if lo <= actual <= hi else ("**BELOW**" if actual < lo else "**ABOVE**")
         if actual == 0 and lo == 0:
             status = "in band"
-        rows.append(f"| {name} | {actual:.1%} | {lo:.0%}–{hi:.0%} | {status} |")
+        rows.append(f"| {name} | {pct(Decimal(str(actual)) * 100)} | {lo:.0%}–{hi:.0%} | {status} |")
     positions = (
         "\n".join(
-            f"- {p.ticker} ({p.sleeve}): {p.shares} sh @ ${p.price} = ${p.value}"
+            f"- {p.ticker} ({p.sleeve}): {shares(p.shares)} sh @ {money(p.price)}"
+            f" = {money(p.value)}"
             for p in state.positions
         )
         or "- (no positions yet)"
     )
     return (
-        f"- **Total value**: ${total:.2f} | **Day change**: {day_change}\n"
-        f"- **Settled cash**: ${state.cash.settled:.2f} | **Unsettled**: ${state.cash.unsettled:.2f}\n\n"
+        f"- **Total value**: {money(total)} | **Day change**: {day_change}\n"
+        f"- **Settled cash**: {money(state.cash.settled)}"
+        f" | **Unsettled**: {money(state.cash.unsettled)}\n\n"
         + "\n".join(rows)
         + "\n\n**Positions**\n"
         + positions
@@ -274,7 +286,9 @@ def render_brief(
     cfg: OperatorConfig,
     snapshot: MarketSnapshot | None = None,
     macro: MacroContext | None = None,
+    integrity: ResearchIntegrity | None = None,
 ) -> str:
+    integrity = integrity or ResearchIntegrity()
     claims = [c for v in bundle.all_views() for c in v.key_findings]
     findings = "\n".join(_fmt_claim(i + 1, c) for i, c in enumerate(claims[:15]))
 
@@ -290,12 +304,19 @@ def render_brief(
         trades += "\n\n**Watch items** (not tickets — mostly affordability or caps):\n" + "\n".join(
             f"- {w}" for w in assessment.watch_items
         )
+    # §7 must never show "No trades today" beside a stated band breach with no
+    # reasoning. Silence is not an option (Task B).
+    trades += assessment.breach_explanation
     if assessment.vetoed:
         trades += "\n\n**Vetoed by portfolio-risk**:\n" + "\n".join(
             f"- {v.ticker}: {v.reason}" for v in assessment.vetoed
         )
 
-    anomalies = sorted(set(bundle.anomalies))
+    # Ticket rejections live on the assessment, not the bundle. They must appear
+    # in §9: a silently dropped ticket is worse than a bad one (Bug 3).
+    anomalies = sorted(
+        set(bundle.anomalies) | set(assessment.anomalies) | set(integrity.anomaly_lines())
+    )
     injection = sorted({f for v in bundle.all_views() for f in v.injection_flags})
     anomaly_lines = [f"- {a}" for a in anomalies]
     if injection:
@@ -304,10 +325,15 @@ def render_brief(
         anomaly_lines.append(f"- {assessment.gfv_status}")
     anomalies_md = "\n".join(anomaly_lines) or "- none this cycle"
 
+    # §1 disclosure: the operator reads TL;DR at 06:30 and §9 last, if at all, so
+    # anything that changes how far the brief can be trusted goes here too.
+    banner = integrity.tldr_banner()
+    integrity_banner = f"{banner}\n\n" if banner else ""
+
     body = f"""# Atlas Daily Brief — {brief_date}
 
 ## TL;DR
-{chr(10).join(f"- {b}" for b in narrative.tldr)}
+{integrity_banner}{chr(10).join(f"- {b}" for b in narrative.tldr)}
 
 ## Portfolio Status
 {_portfolio_status(state, cfg, session)}
@@ -390,28 +416,47 @@ def synthesize_and_persist(
     macro: MacroContext | None = None,
     llm: LLMClient | None = None,
     kind: str = "preopen",
+    integrity: ResearchIntegrity | None = None,
 ) -> Brief:
     cfg = get_operator_config()
+    integrity = integrity or ResearchIntegrity()
     today = state.as_of.isoformat()
 
     defects_feedback: list[str] | None = None
-    brief_md, status, rounds = "", "REJECTED", 0
+    brief_md, rounds = "", 0
+    structural_pass = False
+    reviewed = False
     for round_no in (1, 2):
         rounds = round_no
         narrative = _narrative(bundle, assessment, llm, defects_feedback)
         brief_md = render_brief(
             brief_date=today, bundle=bundle, assessment=assessment, state=state,
             narrative=narrative, session=session, cfg=cfg, snapshot=snapshot, macro=macro,
+            integrity=integrity,
         )
         report = critique_brief(brief_md, bundle, assessment, llm)
+        reviewed = report.adversarially_reviewed
         if report.passes:
-            status = "APPROVED"
+            structural_pass = True
             break
         defects_feedback = [f"[{d.code}] {d.detail}" for d in report.blocking]
         log.warning(f"critic rejected round {round_no}: {defects_feedback}")
 
-    if status != "APPROVED":
+    # Task C: a brief the adversarial layer never saw is never APPROVED. The
+    # label has to be trustworthy precisely when the critic fails, and on free
+    # tier it will fail again — the critic is the last request in the cycle.
+    integrity = replace(integrity, adversarially_reviewed=reviewed)
+    status = integrity.verdict(structural_pass=structural_pass)
+
+    if not structural_pass:
         brief_md += "\n\n> ⚠️ **CRITIC REJECTED** after 2 rounds: " + "; ".join(defects_feedback or [])
+    elif not reviewed:
+        brief_md += (
+            "\n\n> ⚠️ **" + UNREVIEWED_LABEL + ".** The adversarial critic could not "
+            "run this cycle, so this brief passed structural checks only. Its tickets "
+            "are marked UNREVIEWED and cannot be stamped with `atlas filled` without "
+            "an explicit override."
+        )
 
     BRIEFS_DIR.mkdir(exist_ok=True)
     path = BRIEFS_DIR / f"{today}{'' if kind == 'preopen' else '-postclose'}.md"
@@ -434,7 +479,7 @@ def synthesize_and_persist(
             settled_cash=state.cash.settled,
             unsettled_cash=state.cash.unsettled,
             spy_close=spy,
-            positions={p.ticker: str(p.value) for p in state.positions},
+            positions=position_map(state.positions),
         )
     )
     session.flush()
